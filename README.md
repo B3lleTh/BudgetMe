@@ -84,6 +84,7 @@ Descarga la última versión desde la sección
 3. La primera vez, macOS dirá que es de un "desarrollador no identificado"
    — clic derecho sobre la app → **Abrir**, para confirmar que confías en
    ella.
+4. Corriendo lo Siguiente en Terminal :  xattr -cr /Applications/BudgetMe.app
 
 **Windows**
 1. Descarga el instalador `.msi` o `.exe`.
@@ -157,6 +158,7 @@ section:
 2. Open it and drag the app into your Applications folder.
 3. The first time, macOS will say it's from an "unidentified developer" —
    right-click the app → **Open**, to confirm you trust it.
+4. Running This on Terminal :  xattr -cr /Applications/BudgetMe.app
 
 **Windows**
 1. Download the `.msi` or `.exe` installer.
