@@ -1,0 +1,13 @@
+{
+  "name": "finanzas",
+  "version": "3.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npx serve src -l 1420",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}

@@ -1,0 +1,58 @@
+:root {
+  /* --- Paleta base: morado profundo / crema / rosa pastel --- */
+  --morado: #4E4187;
+  --morado-claro: #6f5fb8;
+  --crema: #FFF7EF;
+  --rosa: #FFCFEF;
+  --rosa-suave: rgba(255, 207, 239, 0.18);
+
+  /* --- Fondos: capas de profundidad sobre base morada oscura --- */
+  --fondo-base: #15102b;
+  --fondo-superficie: rgba(255, 255, 255, 0.055);
+  --fondo-elevado: rgba(255, 255, 255, 0.09);
+  --borde-sutil: rgba(255, 255, 255, 0.12);
+
+  /* --- Vidrio (glassmorphism) --- */
+  --glass-blur: 22px;
+  --glass-borde: rgba(255, 255, 255, 0.16);
+  --glass-brillo: rgba(255, 255, 255, 0.06);
+
+  /* --- Texto --- */
+  --texto-principal: var(--crema);
+  --texto-secundario: #cabfe8;
+  --texto-tenue: #9184bd;
+
+  /* --- Acento primario: rosa pastel sobre morado --- */
+  --acento: #FFCFEF;
+  --acento-fuerte: #f7a8e0;
+  --acento-suave: rgba(255, 207, 239, 0.16);
+
+  /* --- Advertencias --- */
+  --advertencia: #ffcf6b;
+  --advertencia-suave: rgba(255, 207, 107, 0.16);
+
+  /* --- Pérdidas/deuda: rojo, siempre para números negativos --- */
+  --perdida: #ff8fa3;
+  --perdida-suave: rgba(255, 107, 129, 0.16);
+
+  /* --- Ganancias: verde, siempre para números positivos --- */
+  --ganancia: #7CE7B8;
+  --ganancia-suave: rgba(124, 231, 184, 0.16);
+
+  /* --- Información --- */
+  --info: #a7c7ff;
+  --info-suave: rgba(167, 199, 255, 0.16);
+
+  --radio-sm: 10px;
+  --radio-md: 16px;
+  --radio-lg: 22px;
+  --sombra-elevada: 0 20px 50px rgba(20, 10, 40, 0.55);
+  --transicion: 180ms cubic-bezier(.4,0,.2,1);
+
+  --fuente-base: -apple-system, "SF Pro Text", "Inter", system-ui, sans-serif;
+  --fuente-numeros: "Inter", var(--fuente-base);
+}
+
+/* Los números siempre en verde (positivo) o rojo (negativo), sin importar la sección. */
+.positivo { color: var(--ganancia) !important; }
+.negativo { color: var(--perdida) !important; }

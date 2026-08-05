@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BudgetMe</title>
+<link rel="stylesheet" href="css/main.css" />
+<script type="importmap">
+{
+  "imports": {
+    "@tauri-apps/plugin-sql": "https://esm.sh/@tauri-apps/plugin-sql@2?target=es2022",
+    "@tauri-apps/plugin-dialog": "https://esm.sh/@tauri-apps/plugin-dialog@2?target=es2022",
+    "@tauri-apps/api/core": "https://esm.sh/@tauri-apps/api@2/core?target=es2022"
+  }
+}
+</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="app">
+    <nav class="nav" id="nav">
+      <div class="nav__marca">BudgetMe<span>.</span></div>
+      <button class="nav__item" data-vista="dashboard"></button>
+      <button class="nav__item" data-vista="ingresos"></button>
+      <button class="nav__item" data-vista="gastos"></button>
+      <button class="nav__item" data-vista="tarjetas"></button>
+      <button class="nav__item" data-vista="cajas"></button>
+      <button class="nav__item" data-vista="recurrentes"></button>
+      <button class="nav__item" data-vista="inversiones"></button>
+      <button class="nav__item" data-vista="historial"></button>
+      <button class="nav__item" data-vista="respaldos"></button>
+      <button class="nav__item" data-vista="configuracion"></button>
+    </nav>
+    <main class="vista" id="vista"></main>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

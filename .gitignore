@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Tauri build output
+src-tauri/target/
+
+# Base de datos local (nunca debe subirse)
+*.db
+*.db-wal
+*.db-shm
+finanzas.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editores
+.vscode/
+.idea/
+*.swp
+
+# Variables de entorno (futuro)
+.env
+.env.local
+
+# Build artifacts sueltos si algún día generas bundles fuera de src-tauri/target
+dist/
+build/
+
+#Ese es mi Prompter Personal
+CONTEXT.md
