@@ -85,6 +85,7 @@ Descarga la última versión desde la sección
    — clic derecho sobre la app → **Abrir**, para confirmar que confías en
    ella.
 4. Corriendo lo Siguiente en Terminal :  xattr -cr /Applications/BudgetMe.app
+5. En caso de BUG al Abrir por primera Vez solo reabra la App
 
 **Windows**
 1. Descarga el instalador `.msi` o `.exe`.
@@ -159,6 +160,7 @@ section:
 3. The first time, macOS will say it's from an "unidentified developer" —
    right-click the app → **Open**, to confirm you trust it.
 4. Running This on Terminal :  xattr -cr /Applications/BudgetMe.app
+5. In Case of Bug at a First Time Usign it, just re-open
 
 **Windows**
 1. Download the `.msi` or `.exe` installer.
