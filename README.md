@@ -1,6 +1,6 @@
 <div align="center">
 
-# FINANZAS
+# BudgetMe
 
 ### *tu dinero, tus reglas, tu computadora*
 ### *your money, your rules, your machine*
@@ -51,7 +51,7 @@ móvil ni web.**
 
 ### ¿Qué es?
 
-Finanzas es una app de escritorio para llevar el control de tus cuentas,
+**BudgetMe** es una app de escritorio para llevar el control de tus cuentas,
 tarjetas de crédito, gastos, ingresos, pagos recurrentes e inversiones —
 todo desde tu computadora, sin necesidad de internet ni de crear una cuenta.
 
@@ -125,7 +125,7 @@ con el autor. Detalles completos en [`LICENSE.md`](./LICENSE.md).
 
 ### What is it?
 
-Finanzas is a desktop app to track your accounts, credit cards, expenses,
+**BudgetMe** is a desktop app to track your accounts, credit cards, expenses,
 income, recurring payments, and investments — all from your computer, no
 internet connection or account creation required.
 
@@ -200,7 +200,7 @@ agreement with the author. Full details in [`LICENSE.md`](./LICENSE.md).
 
 </div>
 
-# Licencia de Finanzas / Finanzas License
+# Licencia de **BudgetMe** / **BudgetMe** License
 
 **Copyright (c) 2026 B3lleTh**
 
