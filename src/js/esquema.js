@@ -142,4 +142,10 @@ export const MIGRACIONES_SQL = [
   // each interest-free installment purchase behaves as its own recurring
   // expense that only lasts msi_meses cycles (see sincronizarMensualidadesTC).
   `ALTER TABLE recurrentes ADD COLUMN gasto_id INTEGER`,
+  // v3.2 — Interest rate for non-MSI card purchases. tasa_interes is the %
+  // applied at capture time; monto_base keeps the original pre-interest
+  // amount so the breakdown/history can still show "what you actually
+  // bought it for" separately from "what it ended up costing".
+  `ALTER TABLE gastos ADD COLUMN tasa_interes REAL NOT NULL DEFAULT 0`,
+  `ALTER TABLE gastos ADD COLUMN monto_base REAL`,
 ];

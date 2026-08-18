@@ -73,6 +73,12 @@ export async function render(vistaEl) {
     accion: async () => {
       const tx = await consultar(`SELECT * FROM transacciones WHERE ref_tabla='gastos' AND ref_id=$1 ORDER BY id DESC`, [id]);
       for (const t of tx) await revertirTransaccion(t);
+      // Delete the auto-generated recurring row that sincronizarMensualidadesTC
+      // created for this MSI purchase (if any) BEFORE deleting the expense —
+      // otherwise it becomes orphaned (its gasto_id points to nothing) and
+      // keeps counting toward "pending to pay" forever, which is what was
+      // causing the duplicated/ghost totals after deleting an expense.
+      await ejecutar(`DELETE FROM recurrentes WHERE gasto_id = $1`, [id]);
       await ejecutar(`DELETE FROM gastos WHERE id = $1`, [id]);
     },
     alExito: () => render(vistaEl),
@@ -152,12 +158,15 @@ function abrirModalEditarGasto(g, alGuardar) {
 }
 
 function filaGasto(g) {
+  const detalleInteres = !g.es_msi && g.tasa_interes > 0
+    ? ` · +${g.tasa_interes}% interest (base ${formatoMoneda(g.monto_base ?? g.monto)})`
+    : '';
   return `
     <div class="fila" data-id="${g.id}">
       <div class="fila__icono">${icono('gasto')}</div>
       <div class="fila__cuerpo">
         <div class="fila__titulo">${g.nombre}</div>
-        <div class="fila__meta">${formatoFecha(g.fecha)} · ${g.categoria} · ${g.metodo_pago === 'tarjeta' ? 'Card' : 'Debit'}${g.es_msi ? ` · Installments ${g.msi_meses}m (${formatoMoneda(g.msi_monto_por_corte || 0)} each, ${g.msi_periodicidad === 'quincenal' ? 'biweekly' : 'monthly'})` : ''}</div>
+        <div class="fila__meta">${formatoFecha(g.fecha)} · ${g.categoria} · ${g.metodo_pago === 'tarjeta' ? 'Card' : 'Debit'}${g.es_msi ? ` · Installments ${g.msi_meses}m (${formatoMoneda(g.msi_monto_por_corte || 0)} each, ${g.msi_periodicidad === 'quincenal' ? 'biweekly' : 'monthly'})` : detalleInteres}</div>
       </div>
       <div class="numero negativo">${formatoMoneda(g.monto)}</div>
       <div class="fila__acciones">
@@ -199,6 +208,11 @@ export function abrirModalGasto({ cuentas, tarjetas }, alGuardar) {
         </div>
         <p id="msi-preview" style="font-size:12px; margin-top:6px;"></p>
       </div>
+      <div class="campo" id="campo-interes" style="display:none;">
+        <label class="campo__etiqueta">Interest rate charged on this purchase (%) — leave 0 if none</label>
+        <input class="campo__control" name="tasa_interes" type="number" step="0.01" min="0" placeholder="0" />
+        <p id="interes-preview" style="font-size:12px; margin-top:6px;"></p>
+      </div>
       <div class="campo"><label class="campo__etiqueta">Notes (optional)</label><input class="campo__control" name="notas" /></div>
       <div class="modal__acciones">
         <button type="button" class="btn btn--fantasma" data-cerrar-modal>Cancel</button>
@@ -210,13 +224,19 @@ export function abrirModalGasto({ cuentas, tarjetas }, alGuardar) {
   const form = overlay.querySelector('#form-gasto');
   activarInputMoneda(form.monto);
   const selMetodo = form.metodo_pago;
+
+  // MSI (interest-free installments) and a flat interest rate are mutually
+  // exclusive on the same purchase — MSI means "no interest" by definition.
   const actualizar = () => {
     const esTarjeta = selMetodo.value === 'tarjeta';
     form.querySelector('#campo-debito').style.display = esTarjeta ? 'none' : 'block';
     form.querySelector('#campo-tarjeta').style.display = esTarjeta ? 'block' : 'none';
     form.querySelector('#campo-msi').style.display = esTarjeta ? 'block' : 'none';
+    form.querySelector('#campo-interes').style.display = esTarjeta && !form.es_msi.checked ? 'block' : 'none';
+    if (!esTarjeta) { form.es_msi.checked = false; form.tasa_interes.value = ''; }
   };
   selMetodo.addEventListener('change', actualizar);
+  form.es_msi.addEventListener('change', actualizar);
   actualizar();
 
   // Preview of how much is charged per statement based on the chosen term
@@ -232,11 +252,23 @@ export function abrirModalGasto({ cuentas, tarjetas }, alGuardar) {
     const montoPorCorte = Math.round((montoTotal / totalCortes) * 100) / 100;
     preview.textContent = `${totalCortes} payments of ${formatoMoneda(montoPorCorte)} every ${form.msi_periodicidad.value === 'quincenal' ? 'two weeks' : 'month'}.`;
   };
+  // Preview of the final amount posted to the card once interest is added.
+  const actualizarPreviewInteres = () => {
+    const preview = overlay.querySelector('#interes-preview');
+    const montoTotal = valorNumericoDeInputMoneda(form.monto);
+    const tasa = Number(form.tasa_interes.value) || 0;
+    if (form.es_msi.checked || !montoTotal || !tasa) { preview.textContent = ''; return; }
+    const montoFinal = Math.round(montoTotal * (1 + tasa / 100) * 100) / 100;
+    preview.textContent = `With ${tasa}% interest, ${formatoMoneda(montoFinal)} will be charged to the card (base ${formatoMoneda(montoTotal)}).`;
+  };
   ['input', 'change'].forEach(ev => {
     form.monto.addEventListener(ev, actualizarPreviewMSI);
     form.msi_meses.addEventListener(ev, actualizarPreviewMSI);
     form.msi_periodicidad.addEventListener(ev, actualizarPreviewMSI);
     form.es_msi.addEventListener(ev, actualizarPreviewMSI);
+    form.monto.addEventListener(ev, actualizarPreviewInteres);
+    form.tasa_interes.addEventListener(ev, actualizarPreviewInteres);
+    form.es_msi.addEventListener(ev, actualizarPreviewInteres);
   });
 
   form.addEventListener('submit', async (e) => {
@@ -244,10 +276,10 @@ export function abrirModalGasto({ cuentas, tarjetas }, alGuardar) {
     const campoNombre = form.nombre.closest('.campo');
     const campoMonto = form.monto.closest('.campo');
     limpiarError(campoNombre); limpiarError(campoMonto);
-    const montoTotal = valorNumericoDeInputMoneda(form.monto);
+    const montoBase = valorNumericoDeInputMoneda(form.monto);
     let valido = true;
     if (!form.nombre.value.trim()) { marcarError(campoNombre, 'Enter a name'); valido = false; }
-    if (!montoTotal || montoTotal <= 0) { marcarError(campoMonto, 'Enter a valid amount'); valido = false; }
+    if (!montoBase || montoBase <= 0) { marcarError(campoMonto, 'Enter a valid amount'); valido = false; }
     if (!valido) return;
 
     const esTarjeta = selMetodo.value === 'tarjeta';
@@ -259,29 +291,37 @@ export function abrirModalGasto({ cuentas, tarjetas }, alGuardar) {
     const periodicidadMSI = esMSI ? form.msi_periodicidad.value : null;
     const cortesPorMes = periodicidadMSI === 'quincenal' ? 2 : 1;
     const totalCortes = esMSI ? meses * cortesPorMes : null;
-    const montoPorCorte = esMSI ? Math.round((montoTotal / totalCortes) * 100) / 100 : null;
+
+    // Interest only applies to non-MSI card purchases. The amount actually
+    // posted to the card (montoFinal) includes it; montoBase is kept
+    // separately so history/edit screens can still show what was bought
+    // for vs. what it ended up costing.
+    const tasaInteres = esTarjeta && !esMSI ? (Number(form.tasa_interes.value) || 0) : 0;
+    const montoFinal = tasaInteres > 0 ? Math.round(montoBase * (1 + tasaInteres / 100) * 100) / 100 : montoBase;
+    const montoPorCorte = esMSI ? Math.round((montoFinal / totalCortes) * 100) / 100 : null;
 
     const btn = form.querySelector('button[type=submit]');
     btn.disabled = true; btn.classList.add('btn--carga');
     try {
       const res = await ejecutar(
-        `INSERT INTO gastos (nombre, categoria, fecha, monto, notas, metodo_pago, tarjeta_id, cuenta_debito_id, es_msi, msi_meses, reservado_tc, msi_periodicidad, msi_monto_por_corte)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-        [form.nombre.value.trim(), form.categoria.value, form.fecha.value || hoyISO(), montoTotal, form.notas.value.trim() || null,
+        `INSERT INTO gastos (nombre, categoria, fecha, monto, notas, metodo_pago, tarjeta_id, cuenta_debito_id, es_msi, msi_meses, reservado_tc, msi_periodicidad, msi_monto_por_corte, tasa_interes, monto_base)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+        [form.nombre.value.trim(), form.categoria.value, form.fecha.value || hoyISO(), montoFinal, form.notas.value.trim() || null,
          selMetodo.value, esTarjeta ? Number(form.tarjeta_id.value) : null, !esTarjeta ? Number(form.cuenta_debito_id.value) : null,
-         esMSI ? 1 : 0, meses, 0, periodicidadMSI, montoPorCorte]
+         esMSI ? 1 : 0, meses, 0, periodicidadMSI, montoPorCorte, tasaInteres, montoBase]
       );
-      // Note: the full debt ($montoTotal) is posted to the card all at once
-      // (that's how a real installment plan works: the store charges the
-      // bank the full amount from day 1). msi_monto_por_corte is kept as a
-      // reference for how much to set aside each statement to cover it, but
-      // it doesn't generate future automatic charges.
+      // Note: the full debt ($montoFinal, already including interest if any)
+      // is posted to the card all at once (that's how a real installment
+      // plan works: the store charges the bank the full amount from day 1).
+      // msi_monto_por_corte is kept as a reference for how much to set aside
+      // each statement to cover it, but it doesn't generate future automatic
+      // charges by itself.
       await registrarGasto({
         gastoId: res.lastInsertId,
         cuentaDebitoId: !esTarjeta ? Number(form.cuenta_debito_id.value) : (cuentas[0]?.id ?? null),
         tarjetaId: esTarjeta ? Number(form.tarjeta_id.value) : null,
         metodoPago: selMetodo.value,
-        monto: montoTotal,
+        monto: montoFinal,
         categoria: form.categoria.value,
         notas: form.nombre.value.trim(),
         fecha: form.fecha.value || hoyISO(),

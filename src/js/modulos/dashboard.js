@@ -4,6 +4,7 @@ import { icono } from '../iconos.js';
 import { navegar } from '../app.js';
 import { idioma } from '../i18n.js';
 import { abrirModal } from '../ui.js';
+import { sincronizarMensualidadesTC } from '../sincronizartc.js';
 
 let graficaMensual, graficaAnual;
 
@@ -30,6 +31,12 @@ async function totalesMes(prefijoMes) {
   return { gastos: gastos[0]?.total || 0, ingresos: ingresos[0]?.total || 0 };
 }
 
+/** "Pending to pay" for the current period: every active recurring expense
+ * (fixed bills AND the auto-generated card-installment/card-balance rows
+ * from sincronizarMensualidadesTC) that is still 'pendiente'. This is
+ * already the correct "what you owe THIS month" figure — it must never be
+ * added to a card's full outstanding balance, or debt still due in future
+ * months gets counted twice (see totalAPagarMes below). */
 async function pendientePorPagar() {
   const filas = await consultar(
     `SELECT id, nombre, monto, activo, meses_activos FROM recurrentes WHERE tipo = 'gasto' AND estado = 'pendiente'`
@@ -117,6 +124,10 @@ export async function render(vistaEl) {
     return;
   }
 
+  // Keep the card-installment/card-balance recurring rows fresh even if the
+  // user opens Dashboard first and never visits Recurring in this session.
+  await sincronizarMensualidadesTC();
+
   const debito = await sumaDebito();
   const mesActual = mesActualPrefijo(0);
   const mesAnterior = mesActualPrefijo(-1);
@@ -126,7 +137,13 @@ export async function render(vistaEl) {
   const { ahorrado, reservadoTC } = await sumaCajas();
 
   const creditoUtilizado = tarjetasCredito.reduce((a, t) => a + t.saldo, 0);
-  const totalAPagarMes = pendiente + creditoUtilizado;
+  // "Total to pay this month" = every pending recurring item, which ALREADY
+  // includes each card's correct monthly installment/aggregate balance
+  // (see sincronizarMensualidadesTC). It must NOT also add creditoUtilizado
+  // (the card's full remaining debt across all future months) — doing so
+  // was double-counting a $7,000/9-month MSI purchase as its ~$778
+  // installment PLUS the entire remaining $7,000 debt.
+  const totalAPagarMes = pendiente;
   const creditoLimite = tarjetasCredito.reduce((a, t) => a + (t.limite || 0), 0);
   const creditoDisponible = creditoLimite - creditoUtilizado;
 
@@ -153,7 +170,7 @@ export async function render(vistaEl) {
 
     ${seccion('Cards', [
       kpi({ etiqueta: 'Total to pay this month (recurring + cards)', valor: formatoMoneda(totalAPagarMes), iconoNombre: 'alerta', claseValor: 'negativo', tipo: 'totalAPagar' }),
-      kpi({ etiqueta: 'Credit used', valor: formatoMoneda(creditoUtilizado), iconoNombre: 'tarjeta', claseValor: 'negativo', tipo: 'creditoUsado' }),
+      kpi({ etiqueta: 'Credit used (total outstanding debt)', valor: formatoMoneda(creditoUtilizado), iconoNombre: 'tarjeta', claseValor: 'negativo', tipo: 'creditoUsado' }),
       kpi({ etiqueta: 'Credit available', valor: formatoMoneda(creditoDisponible), iconoNombre: 'tarjeta', claseValor: 'positivo', tipo: 'creditoDisponible' }),
       kpi({ etiqueta: 'Next statement date', valor: proximoCorte ? formatoFecha(proximoCorte) : '—', iconoNombre: 'reloj', tipo: 'proximoCorte' }),
       kpi({ etiqueta: 'Next payment due date', valor: proximoLimite ? formatoFecha(proximoLimite) : '—', iconoNombre: 'alerta', tipo: 'proximoLimite' }),
@@ -206,15 +223,17 @@ async function abrirDesglose(tipo, ctx) {
       + filaSimple('Expenses', formatoMoneda(ctx.totMesActual.gastos), 'negativo')
       + filaSimple('This month\u2019s savings', formatoMoneda(ctx.ahorroMes), ctx.ahorroMes >= 0 ? 'positivo' : 'negativo');
   } else if (tipo === 'pendienteRecurrente' || tipo === 'totalAPagar') {
+    // Both KPIs now represent the exact same figure — every active,
+    // still-pending recurring item for this period, including the
+    // auto-generated card installment/aggregate rows. Card debt that
+    // isn't due yet (future MSI installments) is intentionally NOT listed
+    // here; see "Credit used" for the full outstanding balance instead.
     titulo = tipo === 'totalAPagar' ? 'Total to pay this month (recurring + cards)' : 'Pending to pay (recurring)';
     filas = ctx.pendienteDetalle.length
       ? ctx.pendienteDetalle.map(r => filaSimple(r.nombre, formatoMoneda(r.monto), 'negativo')).join('')
       : filaSimple('No details available', '—');
-    if (tipo === 'totalAPagar') {
-      filas += ctx.tarjetasCredito.filter(t => t.saldo > 0).map(t => filaSimple(`${t.nombre} (card debt)`, formatoMoneda(t.saldo), 'negativo')).join('');
-    }
   } else if (tipo === 'creditoUsado' || tipo === 'creditoDisponible') {
-    titulo = tipo === 'creditoUsado' ? 'Credit used' : 'Credit available';
+    titulo = tipo === 'creditoUsado' ? 'Credit used (total outstanding debt)' : 'Credit available';
     filas = ctx.tarjetasCredito.length
       ? ctx.tarjetasCredito.map(t => filaSimple(t.nombre, formatoMoneda(tipo === 'creditoUsado' ? t.saldo : (t.limite || 0) - t.saldo), tipo === 'creditoUsado' ? 'negativo' : 'positivo')).join('')
       : filaSimple('No details available', '—');

@@ -6,6 +6,7 @@ import { abrirModal, marcarError, limpiarError } from '../ui.js';
 import { mostrarToast } from '../toasts.js';
 import { confirmarYEliminar, delegarClicEliminar } from '../eliminar.js';
 import { idioma } from '../i18n.js';
+import { sincronizarMensualidadesTC } from '../sincronizartc.js';
 
 const MESES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const ETIQUETA_ESTADO = { pendiente: 'Pending', pagado: 'Paid', omitido: 'Skipped' };
@@ -21,57 +22,6 @@ function aplicaEsteMes(r) {
   const meses = mesesActivos(r);
   if (meses.length === 0) return true; // no selection = every month
   return meses.includes(new Date().getMonth() + 1);
-}
-
-/** Keeps one auto-generated recurring expense per credit card in sync,
- * representing its current statement balance ("mensualidad"), so it shows
- * up in Recurring to be marked as paid just like any other fixed expense. */
-/** Keeps the credit-card auto-recurring expenses in sync:
- * - Each active interest-free installment (MSI) purchase gets its OWN
- *   recurring row for exactly msi_meses cycles (amount = msi_monto_por_corte).
- *   Once msi_pagados reaches msi_meses it's fully settled and the row is
- *   removed — it does NOT keep charging forever.
- * - Everything else on the card (regular, non-MSI charges) is combined into
- *   one aggregate "card payment" recurring row for the current balance. */
-async function sincronizarMensualidadesTC() {
-  const tarjetas = await consultar(`SELECT * FROM tarjetas WHERE tipo = 'credito'`);
-  for (const tj of tarjetas) {
-    const gastosMSI = await consultar(`SELECT * FROM gastos WHERE tarjeta_id = $1 AND es_msi = 1`, [tj.id]);
-    let deudaMSIRestante = 0;
-
-    for (const g of gastosMSI) {
-      const restanteDeuda = Math.max(0, g.monto - (g.msi_monto_por_corte || 0) * g.msi_pagados);
-      deudaMSIRestante += restanteDeuda;
-      const [recExistente] = await consultar(`SELECT * FROM recurrentes WHERE gasto_id = $1 LIMIT 1`, [g.id]);
-      if (g.msi_pagados >= g.msi_meses || restanteDeuda <= 0) {
-        if (recExistente) await ejecutar(`DELETE FROM recurrentes WHERE id = $1`, [recExistente.id]);
-        continue;
-      }
-      const nombre = `${tj.nombre} — ${g.nombre || g.categoria} (installment ${g.msi_pagados + 1}/${g.msi_meses})`;
-      if (!recExistente) {
-        await ejecutar(
-          `INSERT INTO recurrentes (tipo, nombre, categoria, monto, periodicidad, tarjeta_id, gasto_id, estado) VALUES ('gasto', $1, 'tarjeta_credito', $2, 'mensual', $3, $4, 'pendiente')`,
-          [nombre, g.msi_monto_por_corte, tj.id, g.id]
-        );
-      } else if (recExistente.estado === 'pendiente') {
-        await ejecutar(`UPDATE recurrentes SET monto = $1, nombre = $2 WHERE id = $3`, [g.msi_monto_por_corte, nombre, recExistente.id]);
-      }
-    }
-
-    const montoNoMSI = Math.max(0, tj.saldo - deudaMSIRestante);
-    const [agregadoExistente] = await consultar(`SELECT * FROM recurrentes WHERE tarjeta_id = $1 AND gasto_id IS NULL LIMIT 1`, [tj.id]);
-    if (!agregadoExistente) {
-      if (montoNoMSI > 0) {
-        await ejecutar(
-          `INSERT INTO recurrentes (tipo, nombre, categoria, monto, periodicidad, tarjeta_id, estado) VALUES ('gasto', $1, 'tarjeta_credito', $2, 'mensual', $3, 'pendiente')`,
-          [`${tj.nombre} — card payment`, montoNoMSI, tj.id]
-        );
-      }
-    } else if (agregadoExistente.estado === 'pendiente') {
-      if (montoNoMSI <= 0) await ejecutar(`DELETE FROM recurrentes WHERE id = $1`, [agregadoExistente.id]);
-      else if (agregadoExistente.monto !== montoNoMSI) await ejecutar(`UPDATE recurrentes SET monto = $1 WHERE id = $2`, [montoNoMSI, agregadoExistente.id]);
-    }
-  }
 }
 
 export async function render(vistaEl) {
@@ -178,6 +128,7 @@ export async function render(vistaEl) {
 
     if (btnAbonar) {
       const r = recurrentes.find(x => String(x.id) === String(btnAbonar.dataset.id));
+      if (r.tarjeta_id) { mostrarToast('Card payments must be made in full from Recurring', 'error'); return; }
       if (cuentas.length === 0) { mostrarToast('Register a debit account first', 'error'); return; }
       abrirModalAbono(r, cuentas, () => render(vistaEl));
       return;
@@ -216,6 +167,8 @@ export async function render(vistaEl) {
       } catch (err) { console.error(err); mostrarToast('Could not mark as paid', 'error'); btnPagar.disabled = false; btnPagar.classList.remove('btn--carga'); }
     }
     if (btnPagarSD) {
+      const r = recurrentes.find(x => String(x.id) === String(btnPagarSD.dataset.id));
+      if (r?.tarjeta_id) { mostrarToast('Card payments must be made in full from Recurring', 'error'); return; }
       // Marks as paid WITHOUT creating a transaction or deducting the balance:
       // useful when it was already paid "outside" the app (cash, another
       // account, etc.) and you just want to reflect the status without
@@ -279,6 +232,11 @@ function filaRecurrente(r) {
   const meses = mesesActivos(r);
   const etiquetaMeses = meses.length ? meses.map(m => MESES[m - 1]).join(', ') : 'Every month';
   const activo = r.activo === undefined || r.activo === null ? 1 : r.activo;
+  // Card-linked rows (r.tarjeta_id) must ALWAYS go through pagarTarjeta() so
+  // the card's real saldo stays in sync — "already paid (no deduction)" and
+  // "partial payment" are hidden for them to prevent a mismatch where the
+  // recurrente shows 'pagado' but the card debt never actually went down.
+  const esDeTarjeta = !!r.tarjeta_id;
   return `
     <div class="fila" data-id="${r.id}" style="flex-wrap:wrap; opacity:${activo ? 1 : .55};">
       <div class="fila__icono">${icono('recurrente')}</div>
@@ -301,7 +259,7 @@ function filaRecurrente(r) {
         ${r.estado === 'pagado' ? `
           <button class="btn btn--fantasma btn-deshacer-pago" data-id="${r.id}" style="padding:7px 12px;" title="Undo the last payment for this item">${icono('deshacer')} Undo payment</button>` : ''}
         <div id="acciones-ocultas-${r.id}" style="display:none;">
-          ${r.estado === 'pendiente' && activo ? `
+          ${r.estado === 'pendiente' && activo && !esDeTarjeta ? `
             <button class="menu-acciones__item btn-marcar-pagado-sd" data-id="${r.id}">${icono('check')} Already paid (no deduction)</button>
             <button class="menu-acciones__item btn-abonar" data-id="${r.id}">${icono('ingreso')} Add partial payment</button>
           ` : ''}
