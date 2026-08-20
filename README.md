@@ -84,6 +84,8 @@ Descarga la última versión desde la sección
 3. La primera vez, macOS dirá que es de un "desarrollador no identificado"
    — clic derecho sobre la app → **Abrir**, para confirmar que confías en
    ella.
+4. Corriendo lo Siguiente en Terminal :  xattr -cr /Applications/BudgetMe.app
+5. En caso de BUG al Abrir por primera Vez solo reabra la App
 
 **Windows**
 1. Descarga el instalador `.msi` o `.exe`.
@@ -157,6 +159,8 @@ section:
 2. Open it and drag the app into your Applications folder.
 3. The first time, macOS will say it's from an "unidentified developer" —
    right-click the app → **Open**, to confirm you trust it.
+4. Running This on Terminal :  xattr -cr /Applications/BudgetMe.app
+5. In Case of Bug at a First Time Usign it, just re-open
 
 **Windows**
 1. Download the `.msi` or `.exe` installer.
@@ -184,6 +188,67 @@ npm run tauri build
 - The app doesn't connect to the internet or send data anywhere.
 - Backups are files you control — copy them anywhere (USB, personal
   cloud, etc.) for an extra copy.
+
+---
+
+## Actualizar a una nueva versión / Updating to a new version
+
+### 🇲🇽 Español
+
+BudgetMe **no se actualiza solo** — no hay auto-updater conectado a
+internet (coherente con que la app es 100% local, sin conexión a
+servidores). Para actualizar tienes que descargar la nueva versión
+manualmente:
+
+1. Ve a la sección [**Releases**](../../releases) y descarga el instalador
+   más reciente para tu sistema (`.dmg` para macOS, `.msi`/`.exe` para
+   Windows).
+2. **Antes de instalar, haz un respaldo**: abre la app actual → pestaña
+   **Respaldos** → **Crear respaldo**. Esto es opcional pero muy
+   recomendado, sobre todo si la versión trae cambios en la base de datos.
+3. Instala la nueva versión normalmente (mismo proceso que la primera vez,
+   ver [Instalación](#instalación)). En macOS/Windows la instalación nueva
+   reemplaza la anterior — no necesitas desinstalar nada manualmente.
+4. Abre la app. **Tu información NO se borra**: la base de datos vive en el
+   directorio de datos de tu sistema, separado del programa. Si la nueva
+   versión agrega columnas o tablas nuevas, la app las crea/migra
+   automáticamente la primera vez que abres — no se pierde ningún dato
+   existente.
+5. Si algo se ve raro después de actualizar, usa tu respaldo del paso 2:
+   pestaña **Respaldos** → **Restaurar respaldo**.
+
+> 💡 Revisa las notas de cada [Release](../../releases) antes de
+> actualizar — ahí se describe qué cambió y si hay algún paso extra
+> necesario para esa versión en particular.
+
+### 🇺🇸 English
+
+BudgetMe **does not auto-update** — there's no internet-connected updater
+(consistent with the app being 100% local, no server connection). To
+update you need to download the new version manually:
+
+1. Go to the [**Releases**](../../releases) section and download the
+   latest installer for your system (`.dmg` for macOS, `.msi`/`.exe` for
+   Windows).
+2. **Before installing, make a backup**: open the current app → **Backups**
+   tab → **Create backup**. This is optional but strongly recommended,
+   especially if the new version includes database changes.
+3. Install the new version normally (same process as the first time, see
+   [Installation](#installation)). On macOS/Windows the new install
+   replaces the previous one — you don't need to manually uninstall
+   anything.
+4. Open the app. **Your data is NOT erased**: the database lives in your
+   system's app data directory, separate from the program itself. If the
+   new version adds new columns or tables, the app creates/migrates them
+   automatically the first time you open it — no existing data is lost.
+5. If something looks off after updating, use your backup from step 2:
+   **Backups** tab → **Restore backup**.
+
+> 💡 Check each [Release](../../releases)'s notes before updating — they
+> describe what changed and whether that particular version needs any
+> extra step.
+
+---
 
 ### License
 
