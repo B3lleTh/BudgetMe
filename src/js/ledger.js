@@ -4,16 +4,21 @@
 // transacción, usando la cola serializada de db.js para evitar
 // bloqueos de SQLite ("database is locked").
 import { transaccion } from './db.js';
+// Se reutiliza la misma fórmula de amortización que ya usa el preview de
+// "crear préstamo" y sincronizarPrestamos.js, para no mantener dos copias
+// de la misma matemática. sincronizarPrestamos.js solo importa de db.js,
+// así que esta importación no genera ciclo.
+import { calcularPagoMensual } from './sincronizarPrestamos.js';
 
 function hoyISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
-async function registrarTx(db, { fecha, tipo, origen, destino, categoria, monto, notas, ref_tabla, ref_id }) {
+async function registrarTx(db, { fecha, tipo, origen, destino, categoria, monto, notas, ref_tabla, ref_id, prestamo_capital }) {
   await db.execute(
-    `INSERT INTO transacciones (fecha, tipo, origen, destino, categoria, monto, notas, ref_tabla, ref_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-    [fecha || hoyISO(), tipo, origen ?? null, destino ?? null, categoria ?? null, monto, notas ?? null, ref_tabla ?? null, ref_id ?? null]
+    `INSERT INTO transacciones (fecha, tipo, origen, destino, categoria, monto, notas, ref_tabla, ref_id, prestamo_capital)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [fecha || hoyISO(), tipo, origen ?? null, destino ?? null, categoria ?? null, monto, notas ?? null, ref_tabla ?? null, ref_id ?? null, prestamo_capital ?? null]
   );
 }
 
@@ -221,6 +226,117 @@ export async function revertirTransaccion(tx) {
     // Revertir: lo que salió de "origen" regresa (+), lo que entró a "destino" se resta (-)
     await aplicar(tx.origen, +1);
     await aplicar(tx.destino, -1);
+    await db.execute(`DELETE FROM transacciones WHERE id = $1`, [tx.id]);
+  });
+}
+/** Crea un préstamo. Si cuentaDestinoId viene definida, el monto (saldoInicial)
+ * se deposita ahí — cubre "estoy tomando un préstamo nuevo y el dinero cae en
+ * mi cuenta". Si se omite, no se mueve dinero: cubre "ya traigo este préstamo
+ * corriendo y solo lo voy a llevar registrado desde aquí" (saldoInicial puede
+ * ser menor a montoOriginal para reflejar lo que ya se pagó fuera de la app). */
+export async function crearPrestamo({ nombre, montoOriginal, saldoInicial, tasaInteres, plazoMeses, mesesPagados, pagoMensual, fechaInicio, fechaCorte, cuentaDestinoId, cuentaPagoId, notas }) {
+  return transaccion(async (db) => {
+    if (cuentaDestinoId) {
+      await db.execute(`UPDATE cuentas_debito SET saldo = saldo + $1 WHERE id = $2`, [saldoInicial, cuentaDestinoId]);
+      await registrarTx(db, {
+        fecha: fechaInicio, tipo: 'ingreso', origen: 'externo', destino: `debito:${cuentaDestinoId}`,
+        categoria: 'prestamo', monto: saldoInicial, notas: `Loan disbursed — ${nombre}`,
+      });
+    }
+    const res = await db.execute(
+      `INSERT INTO prestamos (nombre, monto_original, saldo_actual, tasa_interes, plazo_meses, meses_pagados, pago_mensual, fecha_inicio, fecha_corte, cuenta_destino_id, cuenta_pago_id, estado, notas)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'activo',$12)`,
+      [nombre, montoOriginal, saldoInicial, tasaInteres, plazoMeses, mesesPagados || 0, pagoMensual, fechaInicio, fechaCorte || null, cuentaDestinoId || null, cuentaPagoId || null, notas || null]
+    );
+    return res.lastInsertId;
+  });
+}
+
+/** Pago mensual de un préstamo: se descuenta de la cuenta de débito y se
+ * separa en interés (no reduce saldo) y capital (sí reduce saldo), igual
+ * que una tabla de amortización real. Guarda el capital aplicado en la
+ * transacción para poder deshacer el pago exactamente después. Si el
+ * saldo llega a 0 o se cubre el plazo, el préstamo se marca 'liquidado'. */
+export async function pagarPrestamo({ prestamo, cuentaDebitoId, monto, fecha, refTabla, refId }) {
+  return transaccion(async (db) => {
+    const interes = Math.round(prestamo.saldo_actual * (prestamo.tasa_interes / 100 / 12) * 100) / 100;
+    const capital = Math.min(prestamo.saldo_actual, Math.max(0, monto - interes));
+    await db.execute(`UPDATE cuentas_debito SET saldo = saldo - $1 WHERE id = $2`, [monto, cuentaDebitoId]);
+    await registrarTx(db, {
+      fecha, tipo: 'pago_prestamo', origen: `debito:${cuentaDebitoId}`, destino: 'externo',
+      categoria: 'prestamo', monto, notas: `${prestamo.nombre} — interest ${interes.toFixed(2)}, principal ${capital.toFixed(2)}`,
+      ref_tabla: refTabla, ref_id: refId, prestamo_capital: capital,
+    });
+    const nuevoSaldo = Math.max(0, prestamo.saldo_actual - capital);
+    const nuevosMesesPagados = prestamo.meses_pagados + 1;
+    const liquidado = nuevoSaldo <= 0 || nuevosMesesPagados >= prestamo.plazo_meses;
+    await db.execute(
+      `UPDATE prestamos SET saldo_actual = $1, meses_pagados = $2, estado = $3 WHERE id = $4`,
+      [nuevoSaldo, nuevosMesesPagados, liquidado ? 'liquidado' : 'activo', prestamo.id]
+    );
+  });
+}
+
+/** Deshace un pago de préstamo: regresa el dinero a la cuenta, restaura el
+ * saldo exactamente en el capital que se le aplicó (guardado en la
+ * transacción), retrocede meses_pagados y reactiva el préstamo si se había
+ * marcado 'liquidado'. */
+export async function revertirPagoPrestamo(tx, prestamo) {
+  return transaccion(async (db) => {
+    const [, idCuenta] = tx.origen.split(':');
+    await db.execute(`UPDATE cuentas_debito SET saldo = saldo + $1 WHERE id = $2`, [tx.monto, idCuenta]);
+    const capital = tx.prestamo_capital || 0;
+    await db.execute(
+      `UPDATE prestamos SET saldo_actual = saldo_actual + $1, meses_pagados = MAX(0, meses_pagados - 1), estado = 'activo' WHERE id = $2`,
+      [capital, prestamo.id]
+    );
+    await db.execute(`DELETE FROM transacciones WHERE id = $1`, [tx.id]);
+  });
+}
+
+/** Abono a capital extra ("adelantar pago"): a diferencia de pagarPrestamo(),
+ * el 100% del monto reduce saldo_actual directamente — no hay separación de
+ * interés porque no sustituye la mensualidad del calendario normal, es
+ * dinero de más para acelerar el préstamo. NO incrementa meses_pagados (no
+ * es "un pago más", es capital adelantado fuera del calendario). Al bajar
+ * el saldo, se recalcula pago_mensual sobre los mismos meses restantes —
+ * misma fórmula que usa el preview al crear el préstamo — para que la
+ * mensualidad futura ya refleje el abono. */
+export async function abonarCapitalPrestamo({ prestamo, cuentaDebitoId, monto, fecha }) {
+  return transaccion(async (db) => {
+    await db.execute(`UPDATE cuentas_debito SET saldo = saldo - $1 WHERE id = $2`, [monto, cuentaDebitoId]);
+    await registrarTx(db, {
+      fecha, tipo: 'abono_capital_prestamo', origen: `debito:${cuentaDebitoId}`, destino: 'externo',
+      categoria: 'prestamo', monto, notas: `Extra principal payment — ${prestamo.nombre}`,
+      ref_tabla: 'prestamos', ref_id: prestamo.id, prestamo_capital: monto,
+    });
+    const nuevoSaldo = Math.max(0, prestamo.saldo_actual - monto);
+    const liquidado = nuevoSaldo <= 0;
+    const mesesRestantes = Math.max(1, prestamo.plazo_meses - prestamo.meses_pagados);
+    const nuevoPagoMensual = liquidado ? 0 : calcularPagoMensual(nuevoSaldo, prestamo.tasa_interes, mesesRestantes);
+    await db.execute(
+      `UPDATE prestamos SET saldo_actual = $1, pago_mensual = $2, estado = $3 WHERE id = $4`,
+      [nuevoSaldo, nuevoPagoMensual, liquidado ? 'liquidado' : 'activo', prestamo.id]
+    );
+  });
+}
+
+/** Deshace un abono a capital: regresa el dinero, restaura saldo_actual y
+ * recalcula pago_mensual hacia atrás con la misma fórmula (NO toca
+ * meses_pagados, a diferencia de revertirPagoPrestamo, porque el abono
+ * nunca lo incrementó). */
+export async function revertirAbonoCapitalPrestamo(tx, prestamo) {
+  return transaccion(async (db) => {
+    const [, idCuenta] = tx.origen.split(':');
+    await db.execute(`UPDATE cuentas_debito SET saldo = saldo + $1 WHERE id = $2`, [tx.monto, idCuenta]);
+    const capital = tx.prestamo_capital || 0;
+    const nuevoSaldo = prestamo.saldo_actual + capital;
+    const mesesRestantes = Math.max(1, prestamo.plazo_meses - prestamo.meses_pagados);
+    const pagoMensual = calcularPagoMensual(nuevoSaldo, prestamo.tasa_interes, mesesRestantes);
+    await db.execute(
+      `UPDATE prestamos SET saldo_actual = $1, pago_mensual = $2, estado = 'activo' WHERE id = $3`,
+      [nuevoSaldo, pagoMensual, prestamo.id]
+    );
     await db.execute(`DELETE FROM transacciones WHERE id = $1`, [tx.id]);
   });
 }

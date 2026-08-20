@@ -27,6 +27,24 @@ CREATE TABLE IF NOT EXISTS tarjetas (
   creado_en TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS prestamos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nombre TEXT NOT NULL,
+  monto_original REAL NOT NULL,
+  saldo_actual REAL NOT NULL,
+  tasa_interes REAL NOT NULL DEFAULT 0,     -- % anual
+  plazo_meses INTEGER NOT NULL,
+  meses_pagados INTEGER NOT NULL DEFAULT 0,
+  pago_mensual REAL NOT NULL,
+  fecha_inicio TEXT NOT NULL,
+  fecha_corte INTEGER,                      -- día del mes (1-31)
+  cuenta_destino_id INTEGER,                 -- a qué cuenta entró el dinero (NULL si ya lo traías)
+  cuenta_pago_id INTEGER,                    -- de qué cuenta se paga la mensualidad
+  estado TEXT NOT NULL DEFAULT 'activo',     -- activo | liquidado
+  notas TEXT,
+  creado_en TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS cajas (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   nombre TEXT NOT NULL,
@@ -96,7 +114,7 @@ CREATE TABLE IF NOT EXISTS transacciones (
   fecha TEXT NOT NULL,
   tipo TEXT NOT NULL,      -- ingreso|gasto|transferencia|pago_tc|movimiento_caja|retiro|deposito|recurrente
   origen TEXT,             -- ej. 'debito:1', 'caja:2', 'externo'
-  destino TEXT,            -- ej. 'tarjeta:1', 'caja:2', 'debito:1'
+  destino TEXT,             -- ej. 'tarjeta:1', 'caja:2', 'debito:1'
   categoria TEXT,
   monto REAL NOT NULL,
   notas TEXT,
@@ -148,4 +166,13 @@ export const MIGRACIONES_SQL = [
   // bought it for" separately from "what it ended up costing".
   `ALTER TABLE gastos ADD COLUMN tasa_interes REAL NOT NULL DEFAULT 0`,
   `ALTER TABLE gastos ADD COLUMN monto_base REAL`,
+  // v3.3 — Préstamos: liga recurrentes al préstamo que los generó (mismo
+  // patrón que tarjeta_id/gasto_id), y guarda el capital exacto aplicado en
+  // cada pago para poder deshacer sin tener que recalcular el interés.
+  `ALTER TABLE recurrentes ADD COLUMN prestamo_id INTEGER`,
+  `ALTER TABLE transacciones ADD COLUMN prestamo_capital REAL`,
+  // v3.4 — Pausar un préstamo (ej. mes de gracia negociado con el banco)
+  // sin marcarlo liquidado ni perder el registro de la deuda. Mismo patrón
+  // que recurrentes.activo: 0 = no genera recurrente mensual mientras dure.
+  `ALTER TABLE prestamos ADD COLUMN activo INTEGER NOT NULL DEFAULT 1`,
 ];

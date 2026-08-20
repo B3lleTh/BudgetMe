@@ -1,5 +1,5 @@
 import { consultar, ejecutar } from '../db.js';
-import { aplicarRecurrente, abonarRecurrente, revertirTransaccion, pagarTarjeta } from '../ledger.js';
+import { aplicarRecurrente, abonarRecurrente, revertirTransaccion, pagarTarjeta, pagarPrestamo, revertirPagoPrestamo } from '../ledger.js';
 import { formatoMoneda, hoyISO, activarInputMoneda, valorNumericoDeInputMoneda } from '../formato.js';
 import { icono } from '../iconos.js';
 import { abrirModal, marcarError, limpiarError } from '../ui.js';
@@ -7,6 +7,7 @@ import { mostrarToast } from '../toasts.js';
 import { confirmarYEliminar, delegarClicEliminar } from '../eliminar.js';
 import { idioma } from '../i18n.js';
 import { sincronizarMensualidadesTC } from '../sincronizartc.js';
+import { sincronizarPrestamos } from '../sincronizarPrestamos.js';
 
 const MESES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const ETIQUETA_ESTADO = { pendiente: 'Pending', pagado: 'Paid', omitido: 'Skipped' };
@@ -27,6 +28,7 @@ function aplicaEsteMes(r) {
 export async function render(vistaEl) {
   const cuentas = await consultar(`SELECT id, nombre FROM cuentas_debito`);
   await sincronizarMensualidadesTC();
+  await sincronizarPrestamos();
   const recurrentes = await consultar(`SELECT * FROM recurrentes WHERE tipo = 'gasto' ORDER BY creado_en DESC`);
 
   const activosEsteMes = recurrentes.filter(aplicaEsteMes);
@@ -101,7 +103,7 @@ export async function render(vistaEl) {
       btnDeshacerPago.disabled = true; btnDeshacerPago.classList.add('btn--carga');
       try {
         const tx = await consultar(
-          `SELECT * FROM transacciones WHERE ref_tabla='recurrentes' AND ref_id=$1 AND tipo IN ('recurrente','abono_recurrente','pago_tc') ORDER BY id DESC`,
+          `SELECT * FROM transacciones WHERE ref_tabla='recurrentes' AND ref_id=$1 AND tipo IN ('recurrente','abono_recurrente','pago_tc','pago_prestamo') ORDER BY id DESC`,
           [r.id]
         );
         for (const t of tx) {
@@ -115,6 +117,14 @@ export async function render(vistaEl) {
             await ejecutar(`UPDATE tarjetas SET saldo = saldo + $1 WHERE id = $2`, [t.monto, idTarjeta]);
             if (r.gasto_id) await ejecutar(`UPDATE gastos SET msi_pagados = MAX(0, msi_pagados - 1) WHERE id = $1`, [r.gasto_id]);
             await ejecutar(`DELETE FROM transacciones WHERE id = $1`, [t.id]);
+          } else if (t.tipo === 'pago_prestamo') {
+            // Same idea as pago_tc: reverting a loan payment must restore
+            // the exact capital that was applied to that payment (saved on
+            // the transaction, see pagarPrestamo in ledger.js) rather than
+            // reusing the generic reversal, which doesn't know how to split
+            // interest vs. principal.
+            const [pr] = await consultar(`SELECT * FROM prestamos WHERE id = $1`, [r.prestamo_id]);
+            await revertirPagoPrestamo(t, pr);
           } else {
             await revertirTransaccion(t);
           }
@@ -129,6 +139,7 @@ export async function render(vistaEl) {
     if (btnAbonar) {
       const r = recurrentes.find(x => String(x.id) === String(btnAbonar.dataset.id));
       if (r.tarjeta_id) { mostrarToast('Card payments must be made in full from Recurring', 'error'); return; }
+      if (r.prestamo_id) { mostrarToast('Loan payments must be made in full from Recurring', 'error'); return; }
       if (cuentas.length === 0) { mostrarToast('Register a debit account first', 'error'); return; }
       abrirModalAbono(r, cuentas, () => render(vistaEl));
       return;
@@ -159,6 +170,10 @@ export async function render(vistaEl) {
             await ejecutar(`UPDATE gastos SET msi_pagados = msi_pagados + 1 WHERE id = $1`, [r.gasto_id]);
           }
           await ejecutar(`UPDATE recurrentes SET estado='pagado', abonado=0 WHERE id=$1`, [r.id]);
+        } else if (r.prestamo_id) {
+          const [pr] = await consultar(`SELECT * FROM prestamos WHERE id = $1`, [r.prestamo_id]);
+          await pagarPrestamo({ prestamo: pr, cuentaDebitoId: r.cuenta_destino_id || cuentas[0].id, monto: restante, fecha: hoyISO(), refTabla: 'recurrentes', refId: r.id });
+          await ejecutar(`UPDATE recurrentes SET estado='pagado', abonado=0 WHERE id=$1`, [r.id]);
         } else {
           await aplicarRecurrente({ recurrente: r, cuentaDebitoId: r.cuenta_destino_id || cuentas[0].id, monto: restante, fecha: hoyISO() });
         }
@@ -168,7 +183,7 @@ export async function render(vistaEl) {
     }
     if (btnPagarSD) {
       const r = recurrentes.find(x => String(x.id) === String(btnPagarSD.dataset.id));
-      if (r?.tarjeta_id) { mostrarToast('Card payments must be made in full from Recurring', 'error'); return; }
+      if (r?.tarjeta_id || r?.prestamo_id) { mostrarToast('Card and loan payments must be made in full from Recurring', 'error'); return; }
       // Marks as paid WITHOUT creating a transaction or deducting the balance:
       // useful when it was already paid "outside" the app (cash, another
       // account, etc.) and you just want to reflect the status without
@@ -232,11 +247,12 @@ function filaRecurrente(r) {
   const meses = mesesActivos(r);
   const etiquetaMeses = meses.length ? meses.map(m => MESES[m - 1]).join(', ') : 'Every month';
   const activo = r.activo === undefined || r.activo === null ? 1 : r.activo;
-  // Card-linked rows (r.tarjeta_id) must ALWAYS go through pagarTarjeta() so
-  // the card's real saldo stays in sync — "already paid (no deduction)" and
-  // "partial payment" are hidden for them to prevent a mismatch where the
-  // recurrente shows 'pagado' but the card debt never actually went down.
-  const esDeTarjeta = !!r.tarjeta_id;
+  // Card-linked (r.tarjeta_id) AND loan-linked (r.prestamo_id) rows must
+  // ALWAYS go through pagarTarjeta()/pagarPrestamo() so the real balance
+  // stays in sync — "already paid (no deduction)" and "partial payment"
+  // are hidden for both to prevent a mismatch where the recurrente shows
+  // 'pagado' but the underlying debt never actually went down.
+  const esDeTarjetaOPrestamo = !!r.tarjeta_id || !!r.prestamo_id;
   return `
     <div class="fila" data-id="${r.id}" style="flex-wrap:wrap; opacity:${activo ? 1 : .55};">
       <div class="fila__icono">${icono('recurrente')}</div>
@@ -259,7 +275,7 @@ function filaRecurrente(r) {
         ${r.estado === 'pagado' ? `
           <button class="btn btn--fantasma btn-deshacer-pago" data-id="${r.id}" style="padding:7px 12px;" title="Undo the last payment for this item">${icono('deshacer')} Undo payment</button>` : ''}
         <div id="acciones-ocultas-${r.id}" style="display:none;">
-          ${r.estado === 'pendiente' && activo && !esDeTarjeta ? `
+          ${r.estado === 'pendiente' && activo && !esDeTarjetaOPrestamo ? `
             <button class="menu-acciones__item btn-marcar-pagado-sd" data-id="${r.id}">${icono('check')} Already paid (no deduction)</button>
             <button class="menu-acciones__item btn-abonar" data-id="${r.id}">${icono('ingreso')} Add partial payment</button>
           ` : ''}

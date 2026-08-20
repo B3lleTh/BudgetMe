@@ -14,6 +14,7 @@ import * as recurrentes from './modulos/recurrentes.js';
 import * as inversiones from './modulos/inversiones.js';
 import * as respaldos from './modulos/respaldos.js';
 import * as configuracion from './modulos/configuracion.js';
+import * as prestamos from './modulos/prestamos.js';
 
 const MODULOS = {
   dashboard: { claveEtiqueta: 'nav.dashboard', icono: 'dashboard', render: dashboard.render },
@@ -26,6 +27,9 @@ const MODULOS = {
   inversiones: { claveEtiqueta: 'nav.inversiones', icono: 'rayo', render: inversiones.render },
   respaldos: { claveEtiqueta: 'nav.respaldos', icono: 'respaldo', render: respaldos.render },
   configuracion: { claveEtiqueta: 'nav.configuracion', icono: 'configuracion', render: configuracion.render },
+  // Ícono dedicado 'prestamo' (v3.4) — antes compartía 'rayo' con Investments
+  // y con el FAB de gasto rápido, lo que causaba confusión visual en el nav.
+  prestamos: { claveEtiqueta: 'nav.prestamos', icono: 'prestamo', render: prestamos.render },
 };
 
 const scrollGuardado = {};
