@@ -1,0 +1,103 @@
+/* "Libreta": tinta azul marino sobre papel frío, como una libreta bancaria.
+   El latón solo aparece en el sello de la marca y en el avance hacia metas. */
+:root {
+  color-scheme: light;
+
+  --papel: #EDF0F3;
+  --superficie: #FFFFFF;
+  --superficie-2: #F5F7F9;
+  --linea: #DDE2E8;
+  --linea-fuerte: #C3CCD6;
+
+  --tinta: #16243A;
+  --tinta-2: #4A5A70;
+  --tinta-3: #77859A;
+
+  --laton: #9A6B1F;
+  --laton-suave: #F3E9D6;
+
+  --activo-fondo: #E4E9F0;
+  --primario: #16243A;
+  --primario-texto: #FFFFFF;
+  --primario-hover: #22344F;
+
+  --ganancia: #17794A;
+  --ganancia-suave: #E3F2EA;
+  --perdida: #B42318;
+  --perdida-suave: #FBE9E7;
+  --advertencia: #9A5B05;
+  --advertencia-suave: #FCF0DC;
+  --info: #2B5BA8;
+  --info-suave: #E5EDF9;
+
+  --foco: #2B5BA8;
+  --velo: rgba(22, 36, 58, 0.38);
+  --sombra-flotante: 0 1px 2px rgba(22, 36, 58, 0.06), 0 12px 32px rgba(22, 36, 58, 0.14);
+
+  --radio-sm: 6px;
+  --radio-md: 10px;
+  --radio-lg: 14px;
+  --transicion: 140ms cubic-bezier(.4, 0, .2, 1);
+
+  --fuente-base: 'Public Sans Variable', 'Public Sans', -apple-system, 'Segoe UI', system-ui, sans-serif;
+}
+
+/* Modo oscuro: el sistema decide, salvo que se fije data-theme. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --papel: #0D1522;
+    --superficie: #131D2C;
+    --superficie-2: #192536;
+    --linea: #24324A;
+    --linea-fuerte: #33455F;
+    --tinta: #E7ECF3;
+    --tinta-2: #A9B5C6;
+    --tinta-3: #7A889D;
+    --laton: #D6A851;
+    --laton-suave: #3A2F1A;
+    --activo-fondo: #1E2B3F;
+    --primario: #DCE4EE;
+    --primario-texto: #0D1522;
+    --primario-hover: #F2F5F9;
+    --ganancia: #46C285;
+    --ganancia-suave: #15372A;
+    --perdida: #F0766E;
+    --perdida-suave: #3E1D1F;
+    --advertencia: #E3A945;
+    --advertencia-suave: #3A2B12;
+    --info: #85A9E8;
+    --info-suave: #1B2C4A;
+    --foco: #85A9E8;
+    --velo: rgba(4, 8, 14, 0.62);
+    --sombra-flotante: 0 1px 2px rgba(0, 0, 0, 0.3), 0 16px 40px rgba(0, 0, 0, 0.45);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --papel: #0D1522;
+  --superficie: #131D2C;
+  --superficie-2: #192536;
+  --linea: #24324A;
+  --linea-fuerte: #33455F;
+  --tinta: #E7ECF3;
+  --tinta-2: #A9B5C6;
+  --tinta-3: #7A889D;
+  --laton: #D6A851;
+  --laton-suave: #3A2F1A;
+  --activo-fondo: #1E2B3F;
+  --primario: #DCE4EE;
+  --primario-texto: #0D1522;
+  --primario-hover: #F2F5F9;
+  --ganancia: #46C285;
+  --ganancia-suave: #15372A;
+  --perdida: #F0766E;
+  --perdida-suave: #3E1D1F;
+  --advertencia: #E3A945;
+  --advertencia-suave: #3A2B12;
+  --info: #85A9E8;
+  --info-suave: #1B2C4A;
+  --foco: #85A9E8;
+  --velo: rgba(4, 8, 14, 0.62);
+  --sombra-flotante: 0 1px 2px rgba(0, 0, 0, 0.3), 0 16px 40px rgba(0, 0, 0, 0.45);
+}

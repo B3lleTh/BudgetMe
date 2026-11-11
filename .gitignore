@@ -34,3 +34,5 @@ build/
 
 #Ese es mi Prompter Personal
 CONTEXTO.md
+# Capturas generadas por npm run capturas
+tests/capturas/

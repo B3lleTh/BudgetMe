@@ -108,6 +108,19 @@ Generar tu propio instalador local:
 npm run tauri build
 ```
 
+Antes de subir cambios:
+
+```bash
+npm run check      # tipos (Svelte + TypeScript)
+npm test           # lógica de saldos e interfaz en Chromium (Tauri simulado)
+npm run test:i18n  # textos de la UI sin traducción al español
+npm run capturas   # capturas de todas las vistas en tests/capturas/
+```
+
+El frontend es Svelte 5 + Vite + TypeScript: `src/vistas/` (una pantalla por
+sección), `src/componentes/` (piezas y formularios), `src/lib/datos/` (base de
+datos, libro mayor y cálculos) y `src/lib/traducciones.ts` (español).
+
 ### Privacidad
 
 - Toda tu información vive en un archivo SQLite en tu computadora.
