@@ -1,13 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "BudgetMe",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "identifier": "com.finanzas.app",
   "build": {
-    "beforeDevCommand": "npx serve src -l 1420",
+    "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "",
-    "frontendDist": "../src"
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
   },
   "app": {
     "windows": [
@@ -36,7 +36,9 @@
   },
   "plugins": {
     "sql": {
-      "preload": ["sqlite:finanzas.db"]
+      "preload": [
+        "sqlite:finanzas.db"
+      ]
     }
   }
 }
