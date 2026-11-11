@@ -1,7 +1,7 @@
 import Database from '@tauri-apps/plugin-sql';
 import { ESQUEMA_SQL, MIGRACIONES_SQL } from './esquema.js';
 
-let _db = null;
+
 let _cola = Promise.resolve();
 
 // Serializa TODO acceso a la base (selects y execute) para evitar
@@ -12,17 +12,27 @@ function encolar(tarea) {
   return resultado;
 }
 
-export async function obtenerDB() {
-  if (_db) return _db;
-  _db = await Database.load('sqlite:finanzas.db');
-  await _db.execute('PRAGMA journal_mode=WAL;');
-  await _db.execute('PRAGMA busy_timeout=5000;');
-  for (const stmt of ESQUEMA_SQL.split(';').map(s => s.trim()).filter(Boolean)) {
-    await _db.execute(stmt);
+
+let _dbPromesa = null;
+
+export function obtenerDB() {
+  if (!_dbPromesa) {
+    _dbPromesa = (async () => {
+      const db = await Database.load('sqlite:finanzas.db');
+      await db.execute('PRAGMA journal_mode=WAL;');
+      await db.execute('PRAGMA busy_timeout=5000;');
+      for (const stmt of ESQUEMA_SQL.split(';').map(s => s.trim()).filter(Boolean)) {
+        await db.execute(stmt);
+      }
+      await migrarEsquema(db);
+      await asegurarCajaReservaTC(db);
+      return db;
+    })().catch((e) => {
+      _dbPromesa = null; // permite reintentar
+      throw e;
+    });
   }
-  await migrarEsquema(_db);
-  await asegurarCajaReservaTC(_db);
-  return _db;
+  return _dbPromesa;
 }
 
 // Aplica columnas nuevas sin tronar si ya existen (ALTER TABLE no soporta
@@ -79,25 +89,43 @@ export async function transaccion(fn) {
   });
 }
 
-// Lista de tablas que se vacían en un reinicio total. El orden no importa
-// porque no hay foreign keys declaradas, pero se deja explícito.
-const TABLAS_REINICIABLES = [
-  'transacciones', 'gastos', 'ingresos_extra', 'recurrentes',
-  'cajas', 'tarjetas', 'cuentas_debito',
-];
 
-/**
- * Borra TODA la información capturada por el usuario y vuelve a dejar la
- * app como recién instalada (incluida la caja de sistema "Reservado para TC").
- * No borra respaldos ya creados en disco.
- */
+/** Vuelca el WAL al archivo principal. Con journal_mode=WAL los cambios
+ * recientes viven en finanzas.db-wal, y el respaldo (que copia solo
+ * finanzas.db) podía salir sin los últimos movimientos. */
+export async function prepararArchivoParaRespaldo() {
+  return encolar(async () => {
+    const db = await obtenerDB();
+    await db.execute('PRAGMA wal_checkpoint(TRUNCATE);');
+  });
+}
+
+/** Cierra la conexión antes de reemplazar el archivo (restaurar/importar),
+ * para que SQLite no escriba páginas viejas encima del respaldo. */
+export async function cerrarConexion() {
+  return encolar(async () => {
+    if (!_dbPromesa) return;
+    const db = await _dbPromesa;
+    await db.execute('PRAGMA wal_checkpoint(TRUNCATE);');
+    await db.close();
+    _dbPromesa = null;
+  });
+}
+
+// Se conservan idioma y nombre de usuario. Quita 'configuracion' de aquí si quieres borrarlos también.
+const TABLAS_CONSERVADAS = new Set(['configuracion']);
+
 export async function reiniciarTodo() {
   return encolar(async () => {
     const db = await obtenerDB();
+    const tablas = (await db.select(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`
+    )).map(t => t.name).filter(n => !TABLAS_CONSERVADAS.has(n));
+
     await db.execute('BEGIN');
     try {
-      for (const tabla of TABLAS_REINICIABLES) {
-        await db.execute(`DELETE FROM ${tabla}`);
+      for (const tabla of tablas) {
+        await db.execute(`DELETE FROM "${tabla}"`);
         await db.execute(`DELETE FROM sqlite_sequence WHERE name = $1`, [tabla]);
       }
       await db.execute('COMMIT');

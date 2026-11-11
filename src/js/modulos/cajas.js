@@ -5,18 +5,20 @@ import {
   hoyISO,
   activarInputMoneda,
   valorNumericoDeInputMoneda,
+  escaparHTML,
 } from "../formato.js";
 import { icono } from "../iconos.js";
-import { abrirModal, marcarError, limpiarError } from "../ui.js";
+import { abrirModal, marcarError, limpiarError, conBotonOcupado } from "../ui.js";
 import { mostrarToast } from "../toasts.js";
 import { confirmarYEliminar, delegarClicEliminar } from "../eliminar.js";
+import { etiquetaDeCuentaConBanco } from '../etiquetas.js';
 
 export async function render(vistaEl) {
   const cajas = await consultar(
     `SELECT * FROM cajas ORDER BY es_sistema, creado_en DESC`,
   );
   const cuentas = await consultar(
-    `SELECT id, nombre, saldo FROM cuentas_debito`,
+    `SELECT id, nombre, banco, saldo FROM cuentas_debito`,
   );
 
   const totalConTC = cajas.reduce((a, c) => a + c.saldo, 0);
@@ -26,12 +28,13 @@ export async function render(vistaEl) {
 
   vistaEl.innerHTML = `
     <div class="vista__encabezado">
-      <div><h1>Savings boxes</h1><p>Goals and money set aside with a purpose</p></div>
-      <button class="btn btn--primario" id="btn-nueva-caja">${icono("caja")} New box</button>
+      <div><h1>Savings boxes</h1><p>Money you set aside from your accounts for a goal. It stays yours, but it no longer counts as available to spend.</p></div>
+      <div class="vista__acciones"><button class="btn btn--primario" id="btn-nueva-caja">${icono("masa")} New box</button></div>
     </div>
-    <div class="grid-kpis" style="margin-bottom:14px;">
-      <div class="tarjeta"><div class="kpi__etiqueta">${icono("caja")} Total saved (all boxes)</div><div class="kpi__valor numero positivo">${formatoMoneda(totalConTC)}</div></div>
-      <div class="tarjeta"><div class="kpi__etiqueta">${icono("caja")} Total saved (excluding card reserve)</div><div class="kpi__valor numero">${formatoMoneda(totalSinTC)}</div></div>
+    <div class="grid-kpis">
+      <div class="tarjeta"><div class="kpi__etiqueta">${icono("caja")} Saved toward goals</div><div class="kpi__valor numero positivo">${formatoMoneda(totalSinTC)}</div></div>
+      <div class="tarjeta"><div class="kpi__etiqueta">${icono("candado")} Reserved for card payments</div><div class="kpi__valor numero">${formatoMoneda(totalConTC - totalSinTC)}</div></div>
+      <div class="tarjeta"><div class="kpi__etiqueta">${icono("caja")} Total in boxes</div><div class="kpi__valor numero">${formatoMoneda(totalConTC)}</div></div>
     </div>
     <div class="grid-2" id="grid-cajas"></div>
   `;
@@ -48,8 +51,14 @@ export async function render(vistaEl) {
       abrirModalCrearCajaDeAhorro(() => render(vistaEl)),
     );
 
-  delegarClicEliminar(grid, ".btn-eliminar-caja", (id) =>
-    confirmarYEliminar({
+  delegarClicEliminar(grid, ".btn-eliminar-caja", (id) => {
+    // Borrar una caja con dinero lo desaparecía (no regresaba a ninguna cuenta).
+    const caja = cajas.find((c) => String(c.id) === id);
+    if (caja && caja.saldo >= 0.01) {
+      mostrarToast("This box still has money. Withdraw it to an account first, then delete the box.", "error", 6000);
+      return;
+    }
+    return confirmarYEliminar({
       mensaje: "This savings box will be deleted.",
       // `AND es_sistema = 0` is the actual safeguard here: it guarantees the
       // system "Reserved for Card Payments" box can never be deleted even if
@@ -58,8 +67,8 @@ export async function render(vistaEl) {
       accion: () =>
         ejecutar(`DELETE FROM cajas WHERE id = $1 AND es_sistema = 0`, [id]),
       alExito: () => render(vistaEl),
-    }),
-  );
+    });
+  });
 
   grid.addEventListener("click", (e) => {
     const btnDep = e.target.closest(".btn-depositar");
@@ -101,23 +110,29 @@ function renderizarTarjetaDeCajaConBarraDeProgreso(c) {
   const progreso = c.meta
     ? Math.min(100, Math.round((c.saldo / c.meta) * 100))
     : null;
+  const nombre = c.es_sistema ? "Reserved for Card Payments" : escaparHTML(c.nombre);
   return `
-    <div class="tarjeta" data-id="${c.id}">
-      <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-        <div class="kpi__etiqueta">${icono(c.es_sistema ? "candado" : "caja")} ${c.nombre}</div>
-        <div style="display:flex; gap:4px;">
-          <button class="btn-icono btn-editar-caja" data-id="${c.id}">${icono("editar")}</button>
-          ${!c.es_sistema ? `<button class="btn-icono peligro btn-eliminar-caja" data-id="${c.id}">${icono("eliminar")}</button>` : ""}
+    <div class="tarjeta" data-id="${c.id}" style="display:flex; flex-direction:column;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+        <div>
+          <h3 style="display:flex; align-items:center; gap:8px;">${icono(c.es_sistema ? "candado" : "caja")} ${nombre}</h3>
+          ${c.objetivo && !c.es_sistema ? `<p class="ayuda" style="margin-top:4px;">${escaparHTML(c.objetivo)}</p>` : ""}
+        </div>
+        <div style="display:flex; gap:2px;">
+          ${!c.es_sistema ? `<button class="btn-icono btn-editar-caja" data-id="${c.id}" title="Edit" aria-label="Edit">${icono("editar")}</button>
+          <button class="btn-icono peligro btn-eliminar-caja" data-id="${c.id}" title="Delete" aria-label="Delete">${icono("eliminar")}</button>` : ""}
         </div>
       </div>
-      <div class="kpi__valor numero positivo">${formatoMoneda(c.saldo)}</div>
-      ${c.meta ? `<p style="margin-top:6px;">Goal: ${formatoMoneda(c.meta)} (${progreso}%)</p>` : ""}
-      <div style="display:flex; gap:8px; margin-top:14px; flex-wrap:wrap;">
-        <button class="btn btn--fantasma btn-depositar" data-id="${c.id}" style="flex:1;">Deposit</button>
-        <button class="btn btn--fantasma btn-retirar" data-id="${c.id}" style="flex:1;">Withdraw</button>
-        ${c.es_sistema ? `<button class="btn btn--fantasma btn-ajustar-caja" data-id="${c.id}" style="flex:1;">Adjust balance</button>` : ""}
+      <div class="kpi__valor numero" style="margin-top:14px;">${formatoMoneda(c.saldo)}</div>
+      ${c.meta ? `
+        <div class="barra barra--meta ${progreso >= 100 ? "barra--listo" : ""}" style="margin-top:12px;"><div class="barra__relleno" style="width:${progreso}%;"></div></div>
+        <div class="fila__meta" style="display:flex; justify-content:space-between; margin-top:6px;"><span>${progreso}% of goal</span><span>Goal: ${formatoMoneda(c.meta)}</span></div>` : ""}
+      ${c.es_sistema ? `<p class="ayuda" style="margin-top:10px;">Deposit, withdraw, or adjust here yourself whenever you decide to set money aside to pay off your cards. Nothing moves automatically.</p>` : ""}
+      <div style="display:flex; gap:8px; margin-top:auto; padding-top:16px; flex-wrap:wrap;">
+        <button class="btn btn--fantasma btn--sm btn-depositar" data-id="${c.id}" style="flex:1;">Deposit</button>
+        <button class="btn btn--fantasma btn--sm btn-retirar" data-id="${c.id}" style="flex:1;">Withdraw</button>
+        ${c.es_sistema ? `<button class="btn btn--fantasma btn--sm btn-ajustar-caja" data-id="${c.id}" style="flex:1;">Adjust balance</button>` : ""}
       </div>
-      ${c.es_sistema ? `<p style="margin-top:8px; font-size:12px;">Deposit, withdraw, or adjust here yourself whenever you decide to set money aside to pay off your cards. Nothing moves automatically.</p>` : ""}
     </div>`;
 }
 
@@ -176,8 +191,8 @@ function abrirModalEditarNombreObjetivoYMetaDeCaja(caja, alGuardar) {
   const { overlay, cerrar } = abrirModal(`
     <h3 class="modal__titulo">Edit savings box</h3>
     <form id="form-editar-caja">
-      <div class="campo"><label class="campo__etiqueta">Name</label><input class="campo__control" name="nombre" required value="${caja.nombre}" /><div class="campo__error"></div></div>
-      <div class="campo"><label class="campo__etiqueta">Goal description (optional)</label><input class="campo__control" name="objetivo" value="${caja.objetivo || ""}" /></div>
+      <div class="campo"><label class="campo__etiqueta">Name</label><input class="campo__control" name="nombre" required value="${escaparHTML(caja.nombre)}" /><div class="campo__error"></div></div>
+      <div class="campo"><label class="campo__etiqueta">Goal description (optional)</label><input class="campo__control" name="objetivo" value="${escaparHTML(caja.objetivo || "")}" /></div>
       <div class="campo"><label class="campo__etiqueta">Target amount (optional)</label><input class="campo__control" name="meta" inputmode="decimal" placeholder="0.00" value="${caja.meta || ""}" /></div>
       <div class="modal__acciones">
         <button type="button" class="btn btn--fantasma" data-cerrar-modal>Cancel</button>
@@ -232,12 +247,13 @@ function abrirModalDepositarORetirarDeCaja(
   }
   const esDeposito = direccion === "deposito";
   const { overlay, cerrar } = abrirModal(`
-    <h3 class="modal__titulo">${esDeposito ? "Deposit to" : "Withdraw from"} ${caja.nombre}</h3>
+    <h3 class="modal__titulo">${esDeposito ? "Deposit to" : "Withdraw from"} ${caja.es_sistema ? "Reserved for Card Payments" : escaparHTML(caja.nombre)}</h3>
+    <p class="modal__subtitulo">Balance in this box: ${formatoMoneda(caja.saldo)}</p>
     <form id="form-mov">
       <div class="campo"><label class="campo__etiqueta">${esDeposito ? "From account" : "To account"}</label>
-        <select class="campo__control" name="cuenta_debito_id">${cuentas.map((c) => `<option value="${c.id}" data-saldo="${c.saldo}">${c.nombre}</option>`).join("")}</select>
+        <select class="campo__control" name="cuenta_debito_id">${cuentas.map((c) => `<option value="${c.id}" data-saldo="${c.saldo}">${etiquetaDeCuentaConBanco(c)}</option>`).join("")}</select>
       </div>
-      ${esDeposito ? `<p class="campo__ayuda" id="saldo-disponible" style="margin:-6px 0 12px; font-size:13px; opacity:.75;"></p>` : ""}
+      ${esDeposito ? `<p class="ayuda" id="saldo-disponible" style="margin:-8px 0 14px;"></p>` : ""}
       <div class="campo"><label class="campo__etiqueta">Amount</label><input class="campo__control" name="monto" inputmode="decimal" placeholder="0.00" required /><div class="campo__error"></div></div>
       <div class="modal__acciones">
         <button type="button" class="btn btn--fantasma" data-cerrar-modal>Cancel</button>
@@ -298,7 +314,7 @@ function abrirModalDepositarORetirarDeCaja(
         return;
       }
     }
-    try {
+    await conBotonOcupado(form.querySelector("button[type=submit]"), async () => { try {
       await movimientoCaja({
         cajaId: caja.id,
         cuentaDebitoId: Number(form.cuenta_debito_id.value),
@@ -319,7 +335,7 @@ function abrirModalDepositarORetirarDeCaja(
       } else {
         mostrarToast("Could not register the movement", "error");
       }
-    }
+    } });
   });
 }
 
@@ -331,8 +347,8 @@ function abrirModalDepositarORetirarDeCaja(
  * entry instead of silently overwriting saldo. */
 function abrirModalAjustarSaldoDeCajaManualmente(caja, alGuardar) {
   const { overlay, cerrar } = abrirModal(`
-    <h3 class="modal__titulo">Adjust balance of ${caja.nombre}</h3>
-    <p style="font-size:13px; opacity:.75; margin:-4px 0 12px;">Current balance: ${formatoMoneda(caja.saldo)}. Set the new balance directly — this does not move money to or from any debit account, it only corrects what this box shows.</p>
+    <h3 class="modal__titulo">Adjust balance of ${caja.es_sistema ? "Reserved for Card Payments" : escaparHTML(caja.nombre)}</h3>
+    <p class="modal__subtitulo">Current balance: ${formatoMoneda(caja.saldo)}. Set the new balance directly — this does not move money to or from any debit account, it only corrects what this box shows.</p>
     <form id="form-ajuste">
       <div class="campo"><label class="campo__etiqueta">New balance</label><input class="campo__control" name="nuevo_saldo" inputmode="decimal" placeholder="0.00" value="${caja.saldo}" required /><div class="campo__error"></div></div>
       <div class="campo"><label class="campo__etiqueta">Reason (optional)</label><input class="campo__control" name="notas" placeholder="e.g. correction, manual set aside…" /></div>

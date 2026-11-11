@@ -1,4 +1,5 @@
 import { traducirTexto } from './i18n.js';
+import { icono } from './iconos.js';
 
 let contenedor;
 
@@ -18,7 +19,7 @@ export function mostrarToast(mensaje, tipo = 'info', duracionMs = 3500) {
   const cont = obtenerContenedor();
   const toast = document.createElement('div');
   toast.className = `toast toast--${tipo}`;
-  toast.innerHTML = `<span class="toast__icono">${tipo === 'exito' ? '✓' : tipo === 'error' ? '✕' : 'ℹ'}</span><span class="toast__texto"></span>`;
+  toast.innerHTML = `${icono(tipo === 'exito' ? 'check' : tipo === 'error' ? 'alerta' : 'info', 'toast__icono')}<span class="toast__texto"></span>`;
   toast.querySelector('.toast__texto').textContent = traducirTexto(mensaje);
   cont.appendChild(toast);
   requestAnimationFrame(() => toast.classList.add('toast--visible'));
@@ -26,6 +27,7 @@ export function mostrarToast(mensaje, tipo = 'info', duracionMs = 3500) {
   const cerrar = () => {
     toast.classList.remove('toast--visible');
     toast.addEventListener('transitionend', () => toast.remove(), { once: true });
+    setTimeout(() => toast.remove(), 400);
   };
   const temporizador = setTimeout(cerrar, duracionMs);
   toast.addEventListener('click', () => { clearTimeout(temporizador); cerrar(); });
@@ -52,10 +54,15 @@ export function confirmarModal({ titulo, mensaje, textoConfirmar = 'Delete', tex
 
     document.body.appendChild(overlay);
     requestAnimationFrame(() => overlay.classList.add('modal-overlay--visible'));
+    // El foco va a "Cancelar" (no a la acción destructiva) y así Escape funciona.
+    overlay.querySelector('[data-accion="cancelar"]').focus();
 
     const cerrar = (resultado) => {
+      if (overlay.inert) return; // ya se respondió
+      overlay.inert = true;
       overlay.classList.remove('modal-overlay--visible');
       overlay.addEventListener('transitionend', () => overlay.remove(), { once: true });
+      setTimeout(() => overlay.remove(), 400);
       resolve(resultado);
     };
     overlay.addEventListener('click', (e) => {

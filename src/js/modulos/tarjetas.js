@@ -1,15 +1,17 @@
 import { consultar, ejecutar } from "../db.js";
 import {
   formatoMoneda,
-  formatoFecha,
   hoyISO,
   activarInputMoneda,
   valorNumericoDeInputMoneda,
+  escaparHTML,
 } from "../formato.js";
 import { icono } from "../iconos.js";
-import { abrirModal, marcarError, limpiarError } from "../ui.js";
+import { abrirModal, marcarError, limpiarError, conBotonOcupado } from "../ui.js";
 import { mostrarToast } from "../toasts.js";
 import { confirmarYEliminar, delegarClicEliminar } from "../eliminar.js";
+import { transferirEntreCuentas } from "../ledger.js";
+import { etiquetaDeCuentaConBanco } from '../etiquetas.js';
 
 export async function render(vistaEl) {
   const cuentas = await consultar(
@@ -18,6 +20,8 @@ export async function render(vistaEl) {
   const tarjetas = await consultar(
     `SELECT * FROM tarjetas ORDER BY tipo, creado_en DESC`,
   );
+
+  const cajas = await consultar(`SELECT id, nombre, saldo FROM cajas WHERE es_sistema = 0 ORDER BY nombre`);
 
   const totalDebito = cuentas.reduce((a, c) => a + c.saldo, 0);
   const totalDeudaTC = tarjetas
@@ -29,27 +33,28 @@ export async function render(vistaEl) {
 
   vistaEl.innerHTML = `
     <div class="vista__encabezado">
-      <div><h1>Cards & Accounts</h1><p>Debit, credit, and their real availability · card payments are made from Recurring</p></div>
-      <div style="display:flex; gap:10px;">
+      <div><h1>Cards & Accounts</h1><p>Your bank accounts and credit cards. Card payments are made from Recurring, where each card’s monthly payment appears on its own.</p></div>
+      <div class="vista__acciones">
+        <button class="btn btn--fantasma" id="btn-mover-dinero">${icono("transferir")} Move money</button>
         <button class="btn btn--fantasma" id="btn-nueva-cuenta">${icono("banco")} Debit account</button>
         <button class="btn btn--primario" id="btn-nueva-tarjeta">${icono("tarjeta")} Card</button>
       </div>
     </div>
 
-    <div class="grid-kpis" style="margin-bottom:14px;">
+    <div class="grid-kpis">
       <div class="tarjeta"><div class="kpi__etiqueta">${icono("banco")} Total in debit accounts</div><div class="kpi__valor numero positivo">${formatoMoneda(totalDebito)}</div></div>
       <div class="tarjeta"><div class="kpi__etiqueta">${icono("tarjeta")} Total credit card debt</div><div class="kpi__valor numero negativo">${formatoMoneda(totalDeudaTC)}</div></div>
       <div class="tarjeta"><div class="kpi__etiqueta">${icono("tarjeta")} Available credit</div><div class="kpi__valor numero">${formatoMoneda(totalDisponibleTC)}</div></div>
     </div>
 
-    <div class="tarjeta" style="margin-bottom:14px;">
-      <h3>Debit Accounts</h3>
-      <div class="lista" id="lista-cuentas" style="margin-top:12px;"></div>
+    <div class="tarjeta seccion">
+      <div class="panel__encabezado"><h3>Debit Accounts</h3></div>
+      <div class="lista" id="lista-cuentas"></div>
     </div>
 
     <div class="tarjeta">
-      <h3>Cards</h3>
-      <div class="lista" id="lista-tarjetas" style="margin-top:12px;"></div>
+      <div class="panel__encabezado"><h3>Cards</h3></div>
+      <div class="lista" id="lista-tarjetas"></div>
     </div>
   `;
 
@@ -59,11 +64,11 @@ export async function render(vistaEl) {
           (c) => `
       <div class="fila" data-id="${c.id}">
         <div class="fila__icono">${icono("banco")}</div>
-        <div class="fila__cuerpo"><div class="fila__titulo">${c.nombre}</div><div class="fila__meta">${c.banco || "no bank"}</div></div>
-        <div class="numero positivo">${formatoMoneda(c.saldo)}</div>
+        <div class="fila__cuerpo"><div class="fila__titulo">${escaparHTML(c.nombre)}</div><div class="fila__meta">${escaparHTML(c.banco || "no bank")}</div></div>
+        <div class="numero ${c.saldo < 0 ? "negativo" : ""}">${formatoMoneda(c.saldo)}</div>
         <div class="fila__acciones">
-          <button class="btn-icono btn-editar-cuenta" data-id="${c.id}">${icono("editar")}</button>
-          <button class="btn-icono peligro btn-eliminar-cuenta" data-id="${c.id}">${icono("eliminar")}</button>
+          <button class="btn-icono btn-editar-cuenta" data-id="${c.id}" title="Edit" aria-label="Edit">${icono("editar")}</button>
+          <button class="btn-icono peligro btn-eliminar-cuenta" data-id="${c.id}" title="Delete" aria-label="Delete">${icono("eliminar")}</button>
         </div>
       </div>`,
         )
@@ -86,16 +91,25 @@ export async function render(vistaEl) {
     .addEventListener("click", () =>
       abrirModalCrearOEditarTarjeta(null, () => render(vistaEl)),
     );
+    vistaEl.querySelector("#btn-mover-dinero").addEventListener("click", () =>
+  abrirModalMoverDineroEntreCuentasOCajas(cuentas, cajas, () => render(vistaEl)));
 
   const listaCuentas = vistaEl.querySelector("#lista-cuentas");
-  delegarClicEliminar(listaCuentas, ".btn-eliminar-cuenta", (id) =>
-    confirmarYEliminar({
+  delegarClicEliminar(listaCuentas, ".btn-eliminar-cuenta", (id) => {
+    // Borrar una cuenta con dinero lo hacía desaparecer del patrimonio sin
+    // dejar rastro: primero hay que moverlo a otra cuenta o caja.
+    const cuenta = cuentas.find((x) => String(x.id) === id);
+    if (cuenta && Math.abs(cuenta.saldo) >= 0.01) {
+      mostrarToast("This account still has a balance. Move the money to another account first (Move money), then delete it.", "error", 6000);
+      return;
+    }
+    return confirmarYEliminar({
       mensaje:
         "This debit account will be deleted. This does not revert past transactions.",
       accion: () => ejecutar(`DELETE FROM cuentas_debito WHERE id = $1`, [id]),
       alExito: () => render(vistaEl),
-    }),
-  );
+    });
+  });
   listaCuentas.addEventListener("click", (e) => {
     const btn = e.target.closest(".btn-editar-cuenta");
     if (!btn) return;
@@ -104,8 +118,13 @@ export async function render(vistaEl) {
   });
 
   const listaTarjetas = vistaEl.querySelector("#lista-tarjetas");
-  delegarClicEliminar(listaTarjetas, ".btn-eliminar-tarjeta", (id) =>
-    confirmarYEliminar({
+  delegarClicEliminar(listaTarjetas, ".btn-eliminar-tarjeta", (id) => {
+    const tarjeta = tarjetas.find((x) => String(x.id) === id);
+    if (tarjeta && tarjeta.tipo === "credito" && tarjeta.saldo >= 0.01) {
+      mostrarToast("This card still has debt. Pay it off from Recurring (or set its debt to 0 if it’s already paid), then delete it.", "error", 6000);
+      return;
+    }
+    return confirmarYEliminar({
       mensaje:
         "This card will be deleted. This does not revert past transactions.",
       accion: async () => {
@@ -119,8 +138,8 @@ export async function render(vistaEl) {
         await ejecutar(`DELETE FROM tarjetas WHERE id = $1`, [id]);
       },
       alExito: () => render(vistaEl),
-    }),
-  );
+    });
+  });
   listaTarjetas.addEventListener("click", (e) => {
     const btnEditar = e.target.closest(".btn-editar-tarjeta");
     if (btnEditar) {
@@ -141,19 +160,24 @@ function renderizarFilaTarjetaConDisponibleYPorcentajeUsado(t) {
     esCredito && t.limite
       ? Math.min(100, Math.round((t.saldo / t.limite) * 100))
       : null;
+  const claseBarra = porcentaje >= 80 ? "barra--alerta" : "";
   return `
-    <div class="fila" data-id="${t.id}" style="flex-wrap:wrap;">
+    <div class="fila" data-id="${t.id}">
       <div class="fila__icono">${icono("tarjeta")}</div>
       <div class="fila__cuerpo">
-        <div class="fila__titulo">${t.nombre} <span class="badge badge--pendiente">${esCredito ? "credit" : "debit"}</span></div>
+        <div class="fila__titulo">${escaparHTML(t.nombre)} <span class="badge">${esCredito ? "Credit" : "Debit"}</span></div>
         <div class="fila__meta">
-          ${esCredito ? `Statement day ${t.fecha_corte || "—"} · Payment due day ${t.fecha_limite_pago || "—"} · Available ${formatoMoneda(disponible)} (${porcentaje}% used)` : t.banco || ""}
+          ${esCredito ? `${escaparHTML(t.banco || "")}${t.banco ? " · " : ""}Statement day ${t.fecha_corte || "—"} · Payment due day ${t.fecha_limite_pago || "—"}` : escaparHTML(t.banco || "")}
         </div>
+        ${porcentaje != null ? `<div style="display:flex; align-items:center; gap:10px; margin-top:8px; max-width:420px;">
+          <div class="barra ${claseBarra}" style="flex:1;"><div class="barra__relleno" style="width:${porcentaje}%;"></div></div>
+          <span class="fila__meta" style="margin:0; white-space:nowrap;">${porcentaje}% used · Available ${formatoMoneda(disponible)}</span>
+        </div>` : ""}
       </div>
-      <div class="numero ${esCredito ? "negativo" : "positivo"}">${formatoMoneda(t.saldo)}</div>
+      <div class="fila__monto"><span class="numero ${esCredito && t.saldo > 0 ? "negativo" : ""}">${formatoMoneda(t.saldo)}</span>${esCredito ? `<small>owed</small>` : ""}</div>
       <div class="fila__acciones">
-        <button class="btn-icono btn-editar-tarjeta" data-id="${t.id}">${icono("editar")}</button>
-        <button class="btn-icono peligro btn-eliminar-tarjeta" data-id="${t.id}">${icono("eliminar")}</button>
+        <button class="btn-icono btn-editar-tarjeta" data-id="${t.id}" title="Edit" aria-label="Edit">${icono("editar")}</button>
+        <button class="btn-icono peligro btn-eliminar-tarjeta" data-id="${t.id}" title="Delete" aria-label="Delete">${icono("eliminar")}</button>
       </div>
     </div>`;
 }
@@ -165,8 +189,8 @@ function abrirModalCrearOEditarCuentaDebito(registro, alGuardar) {
   const { overlay, cerrar } = abrirModal(`
     <h3 class="modal__titulo">${editando ? "Edit" : "New"} debit account</h3>
     <form id="form-cuenta">
-      <div class="campo"><label class="campo__etiqueta">Name</label><input class="campo__control" name="nombre" required value="${registro?.nombre || ""}" /><div class="campo__error"></div></div>
-      <div class="campo"><label class="campo__etiqueta">Bank</label><input class="campo__control" name="banco" value="${registro?.banco || ""}" /></div>
+      <div class="campo"><label class="campo__etiqueta">Name</label><input class="campo__control" name="nombre" required value="${escaparHTML(registro?.nombre || "")}" /><div class="campo__error"></div></div>
+      <div class="campo"><label class="campo__etiqueta">Bank</label><input class="campo__control" name="banco" value="${escaparHTML(registro?.banco || "")}" /></div>
       <div class="campo"><label class="campo__etiqueta">${editando ? "Current balance" : "Starting balance"}</label><input class="campo__control" name="saldo" inputmode="decimal" placeholder="0.00" value="${registro?.saldo ?? ""}" /></div>
       <div class="modal__acciones">
         <button type="button" class="btn btn--fantasma" data-cerrar-modal>Cancel</button>
@@ -224,9 +248,9 @@ function abrirModalCrearOEditarTarjeta(registro, alGuardar) {
   const { overlay, cerrar } = abrirModal(`
     <h3 class="modal__titulo">${editando ? "Edit" : "New"} card</h3>
     <form id="form-tarjeta">
-      <div class="campo"><label class="campo__etiqueta">Name</label><input class="campo__control" name="nombre" required value="${registro?.nombre || ""}" /><div class="campo__error"></div></div>
+      <div class="campo"><label class="campo__etiqueta">Name</label><input class="campo__control" name="nombre" required value="${escaparHTML(registro?.nombre || "")}" /><div class="campo__error"></div></div>
       <div class="campo__fila">
-        <div class="campo"><label class="campo__etiqueta">Bank</label><input class="campo__control" name="banco" value="${registro?.banco || ""}" /></div>
+        <div class="campo"><label class="campo__etiqueta">Bank</label><input class="campo__control" name="banco" value="${escaparHTML(registro?.banco || "")}" /></div>
         <div class="campo"><label class="campo__etiqueta">Type</label>
           <select class="campo__control" name="tipo">
             <option value="credito" ${registro?.tipo !== "debito" ? "selected" : ""}>Credit</option>
@@ -303,6 +327,82 @@ function abrirModalCrearOEditarTarjeta(registro, alGuardar) {
     } catch (err) {
       console.error(err);
       mostrarToast("Could not save the card", "error");
+    }
+  });
+}
+
+/** Moves money between debit accounts and/or savings boxes. It is NOT income or
+ * an expense: the ledger stores a single neutral 'transferencia' entry. */
+function abrirModalMoverDineroEntreCuentasOCajas(cuentas, cajas, alGuardar) {
+  const lugares = [
+    ...cuentas.map(c => ({ ref: `debito:${c.id}`, nombre: etiquetaDeCuentaConBanco(c), saldo: c.saldo, tipo: 'Debit' })),
+    ...cajas.map(c => ({ ref: `caja:${c.id}`, nombre: c.nombre, saldo: c.saldo, tipo: 'Savings box' })),
+  ];
+  if (lugares.length < 2) {
+    mostrarToast("You need at least two accounts or boxes to move money", "error");
+    return;
+  }
+  const opciones = lugares.map(l =>
+    `<option value="${l.ref}" data-saldo="${l.saldo}">${l.tipo === "Savings box" ? escaparHTML(l.nombre) : l.nombre} (${l.tipo})</option>`).join("");
+
+  const { overlay, cerrar } = abrirModal(`
+    <h3 class="modal__titulo">Move money</h3>
+    <p class="modal__subtitulo">Transfers are not counted as income or expenses — it’s the same money, just moved.</p>
+    <form id="form-mover">
+      <div class="campo"><label class="campo__etiqueta">Move from</label>
+        <select class="campo__control" name="origen">${opciones}</select></div>
+      <p id="saldo-origen" class="ayuda" style="margin:-8px 0 14px;"></p>
+      <div class="campo"><label class="campo__etiqueta">Move to</label>
+        <select class="campo__control" name="destino">${opciones}</select></div>
+      <div class="campo"><label class="campo__etiqueta">Amount</label>
+        <input class="campo__control" name="monto" inputmode="decimal" placeholder="0.00" required /><div class="campo__error"></div></div>
+      <div class="campo"><label class="campo__etiqueta">Notes (optional)</label>
+        <input class="campo__control" name="notas" /></div>
+      <div class="campo"><label class="campo__etiqueta">Date</label>
+        <input class="campo__control" type="date" name="fecha" value="${hoyISO()}" /></div>
+      <div class="modal__acciones">
+        <button type="button" class="btn btn--fantasma" data-cerrar-modal>Cancel</button>
+        <button type="submit" class="btn btn--primario">Move money</button>
+      </div>
+    </form>`);
+
+  const form = overlay.querySelector("#form-mover");
+  activarInputMoneda(form.monto);
+  form.destino.selectedIndex = 1;
+
+  const mostrarSaldoDelOrigen = () => {
+    const saldo = Number(form.origen.selectedOptions[0]?.dataset.saldo || 0);
+    overlay.querySelector("#saldo-origen").textContent = `Available in this account: ${formatoMoneda(saldo)}`;
+  };
+  mostrarSaldoDelOrigen();
+  form.origen.addEventListener("change", mostrarSaldoDelOrigen);
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const campoMonto = form.monto.closest(".campo");
+    limpiarError(campoMonto);
+    const monto = valorNumericoDeInputMoneda(form.monto);
+    if (!monto || monto <= 0) { marcarError(campoMonto, "Enter a valid amount"); return; }
+    if (form.origen.value === form.destino.value) {
+      mostrarToast("Origin and destination must be different", "error"); return;
+    }
+    const btn = form.querySelector("button[type=submit]");
+    btn.disabled = true; btn.classList.add("btn--carga");
+    try {
+      await transferirEntreCuentas({
+        origen: form.origen.value, destino: form.destino.value, monto,
+        notas: form.notas.value.trim() || null, fecha: form.fecha.value || hoyISO(),
+      });
+      mostrarToast("Money moved", "exito");
+      cerrar(); alGuardar();
+    } catch (err) {
+      console.error(err);
+      const msg = String(err);
+      mostrarToast(
+        msg.includes("INSUFFICIENT_DEBIT_BALANCE") ? "Not enough balance in the origin"
+        : msg.includes("SAME_ACCOUNT") ? "Origin and destination must be different"
+        : "Could not move the money", "error");
+      btn.disabled = false; btn.classList.remove("btn--carga");
     }
   });
 }

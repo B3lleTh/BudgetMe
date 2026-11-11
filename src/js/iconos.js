@@ -32,6 +32,14 @@ export const ICONOS = {
   // Documento con esquina doblada + signo de porcentaje: comunica "documento
   // financiero con interés", distinto de tarjeta (rectángulo con banda) y
   // banco (columnas). Nuevo en v3.3 — dedicado exclusivamente a Préstamos.
+  mas_opciones: base('<circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>'),
+  // Inversiones: línea ascendente sobre ejes (antes compartía 'rayo' con el FAB).
+  grafica: base('<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 6-6"/><path d="M16 8h4v4"/>'),
+  transferir: base('<path d="M7 4L3 8l4 4"/><path d="M3 8h14"/><path d="M17 20l4-4-4-4"/><path d="M21 16H7"/>'),
+  calendario: base('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4"/><path d="M16 3v4"/>'),
+  info: base('<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/>'),
+  tendencia_arriba: base('<path d="M12 19V5"/><path d="M6 11l6-6 6 6"/>'),
+  tendencia_abajo: base('<path d="M12 5v14"/><path d="M6 13l6 6 6-6"/>'),
   prestamo: base('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><circle cx="9.5" cy="15" r="1.4"/><circle cx="14.5" cy="18.5" r="1.4"/><path d="M9.5 19l5-5"/>'),
 };
 
