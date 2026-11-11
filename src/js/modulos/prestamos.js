@@ -1,6 +1,7 @@
+import { etiquetaDeCuentaConBanco } from '../etiquetas.js';
 import { consultar, ejecutar } from '../db.js';
 import { crearPrestamo, abonarCapitalPrestamo } from '../ledger.js';
-import { formatoMoneda, formatoFecha, hoyISO, activarInputMoneda, valorNumericoDeInputMoneda } from '../formato.js';
+import { formatoMoneda, hoyISO, activarInputMoneda, valorNumericoDeInputMoneda, escaparHTML } from '../formato.js';
 import { icono } from '../iconos.js';
 import { abrirModal, marcarError, limpiarError } from '../ui.js';
 import { mostrarToast } from '../toasts.js';
@@ -13,7 +14,7 @@ import { sincronizarPrestamos, calcularPagoMensual } from '../sincronizarPrestam
 let mostrarLiquidados = true;
 
 export async function render(vistaEl) {
-  const cuentas = await consultar(`SELECT id, nombre FROM cuentas_debito`);
+  const cuentas = await consultar(`SELECT id, nombre, banco FROM cuentas_debito`);
   await sincronizarPrestamos();
   const prestamos = await consultar(`SELECT * FROM prestamos ORDER BY estado ASC, activo DESC, creado_en DESC`);
 
@@ -24,20 +25,21 @@ export async function render(vistaEl) {
 
   vistaEl.innerHTML = `
     <div class="vista__encabezado">
-      <div><h1>Loans</h1><p>Track personal loans, their interest, and their payoff progress</p></div>
-      <button class="btn btn--primario" id="btn-nuevo-prestamo">${icono('prestamo')} New loan</button>
+      <div><h1>Loans</h1><p>Track personal loans, their interest, and their payoff progress. Each month’s payment appears in Recurring.</p></div>
+      <div class="vista__acciones"><button class="btn btn--primario" id="btn-nuevo-prestamo">${icono('masa')} New loan</button></div>
     </div>
 
-    <div class="grid-kpis" style="margin-bottom:14px;">
+    <div class="grid-kpis">
       <div class="tarjeta"><div class="kpi__etiqueta">${icono('alerta')} Total owed</div><div class="kpi__valor numero negativo">${formatoMoneda(totalDeuda)}</div></div>
       <div class="tarjeta"><div class="kpi__etiqueta">${icono('recurrente')} Monthly payments committed</div><div class="kpi__valor numero negativo">${formatoMoneda(totalMensualidad)}</div></div>
     </div>
 
     <div class="tarjeta">
-      <div style="display:flex; align-items:center; justify-content:flex-end; margin-bottom:10px;">
-        <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; opacity:.85; cursor:pointer;">
+      <div class="panel__encabezado">
+        <h3>Your loans</h3>
+        <label class="switch">
           <input type="checkbox" id="chk-mostrar-liquidados" ${mostrarLiquidados ? 'checked' : ''} />
-          Show paid-off loans
+          <span class="switch__pista"></span><span class="switch__etiqueta ayuda">Show paid-off loans</span>
         </label>
       </div>
       <div class="lista" id="lista-prestamos"></div>
@@ -113,28 +115,29 @@ function filaPrestamo(p) {
   const liquidado = p.estado === 'liquidado';
   const pausado = !liquidado && !p.activo;
   return `
-    <div class="fila" data-id="${p.id}" style="flex-wrap:wrap; opacity:${liquidado ? .6 : 1};">
+    <div class="fila ${liquidado ? 'fila--pausada' : ''}" data-id="${p.id}">
       <div class="fila__icono">${icono('prestamo')}</div>
       <div class="fila__cuerpo">
         <div class="fila__titulo">
-          ${p.nombre}
+          ${escaparHTML(p.nombre)}
           ${liquidado ? '<span class="badge badge--pagado">Paid off</span>' : ''}
           ${pausado ? '<span class="badge">Paused</span>' : ''}
         </div>
         <div class="fila__meta">
-          ${p.tasa_interes}% annual · ${p.meses_pagados}/${p.plazo_meses} payments (${progreso}%) · Statement day ${p.fecha_corte || '—'} · Monthly payment ${formatoMoneda(p.pago_mensual)}
+          ${p.tasa_interes}% annual · Monthly payment ${formatoMoneda(p.pago_mensual)} · Payment day ${p.fecha_corte || '—'}
         </div>
-        <div style="height:6px; border-radius:4px; background:rgba(255,255,255,.08); overflow:hidden; margin-top:8px; max-width:320px;">
-          <div style="height:100%; width:${progreso}%; border-radius:4px; background:${liquidado ? '#4ade80' : '#60a5fa'}; transition:width .3s;"></div>
+        <div style="display:flex; align-items:center; gap:10px; margin-top:8px; max-width:420px;">
+          <div class="barra ${liquidado ? 'barra--listo' : ''}" style="flex:1;"><div class="barra__relleno" style="width:${progreso}%;"></div></div>
+          <span class="fila__meta" style="margin:0; white-space:nowrap;">${p.meses_pagados}/${p.plazo_meses} payments</span>
         </div>
       </div>
-      <div class="numero negativo">${formatoMoneda(p.saldo_actual)}</div>
+      <div class="fila__monto"><span class="numero ${liquidado ? '' : 'negativo'}">${formatoMoneda(p.saldo_actual)}</span><small>left to pay</small></div>
       <div class="fila__acciones">
         ${!liquidado ? `<button class="btn-icono btn-amortizacion-prestamo" data-id="${p.id}" title="View amortization schedule">${icono('historial')}</button>` : ''}
         ${!liquidado ? `<button class="btn-icono btn-abono-prestamo" data-id="${p.id}" title="Extra principal payment">${icono('masa')}</button>` : ''}
         ${!liquidado ? `<button class="btn-icono btn-pausar-prestamo" data-id="${p.id}" title="${p.activo ? 'Pause loan' : 'Resume loan'}">${icono(p.activo ? 'reloj' : 'check')}</button>` : ''}
         ${!liquidado ? `<button class="btn-icono btn-editar-prestamo" data-id="${p.id}" title="Edit loan">${icono('editar')}</button>` : ''}
-        <button class="btn-icono peligro btn-eliminar-prestamo" data-id="${p.id}">${icono('eliminar')}</button>
+        <button class="btn-icono peligro btn-eliminar-prestamo" data-id="${p.id}" title="Delete" aria-label="Delete">${icono('eliminar')}</button>
       </div>
     </div>`;
 }
@@ -162,7 +165,7 @@ function abrirModalCrearPrestamo(cuentas, alGuardar) {
         <div class="campo"><label class="campo__etiqueta">Deposit the loan amount into an account?</label>
           <select class="campo__control" name="cuenta_destino_id">
             <option value="">No — I already have the money / don't track this deposit</option>
-            ${cuentas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('')}
+            ${cuentas.map(c => `<option value="${c.id}">${etiquetaDeCuentaConBanco(c)}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -177,10 +180,10 @@ function abrirModalCrearPrestamo(cuentas, alGuardar) {
       <div class="campo"><label class="campo__etiqueta">Notes</label><textarea class="campo__control" name="notas" rows="2" placeholder="Optional"></textarea></div>
 
       <div class="campo"><label class="campo__etiqueta">Pay from account</label>
-        <select class="campo__control" name="cuenta_pago_id" required>${cuentas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('')}</select>
+        <select class="campo__control" name="cuenta_pago_id" required>${cuentas.map(c => `<option value="${c.id}">${etiquetaDeCuentaConBanco(c)}</option>`).join('')}</select>
       </div>
 
-      <p id="pago-preview" style="font-size:12.5px; margin:4px 0 12px; opacity:.85;"></p>
+      <p id="pago-preview" class="campo__vista-previa"></p>
 
       <div class="modal__acciones">
         <button type="button" class="btn btn--fantasma" data-cerrar-modal>Cancel</button>
@@ -280,11 +283,10 @@ function abrirModalCrearPrestamo(cuentas, alGuardar) {
 function abrirModalEditarPrestamo(prestamo, cuentas, alGuardar) {
   const { overlay, cerrar } = abrirModal(`
     <h3 class="modal__titulo">Edit loan</h3>
-    <p style="font-size:12.5px; opacity:.75; margin:-6px 0 14px;">
-      Remaining balance and payments made can't be edited here — they only change through real payments or an extra principal payment.
+    <p class="modal__subtitulo">Remaining balance and payments made can't be edited here — they only change through real payments or an extra principal payment.
     </p>
     <form id="form-editar-prestamo">
-      <div class="campo"><label class="campo__etiqueta">Name</label><input class="campo__control" name="nombre" value="${prestamo.nombre}" required /><div class="campo__error"></div></div>
+      <div class="campo"><label class="campo__etiqueta">Name</label><input class="campo__control" name="nombre" value="${escaparHTML(prestamo.nombre)}" required /><div class="campo__error"></div></div>
       <div class="campo__fila">
         <div class="campo"><label class="campo__etiqueta">Annual interest rate (%)</label><input class="campo__control" name="tasa_interes" type="number" step="0.01" min="0" value="${prestamo.tasa_interes}" /></div>
         <div class="campo"><label class="campo__etiqueta">Total term (months)</label><input class="campo__control" name="plazo_meses" type="number" min="${prestamo.meses_pagados + 1}" value="${prestamo.plazo_meses}" required /><div class="campo__error"></div></div>
@@ -292,12 +294,12 @@ function abrirModalEditarPrestamo(prestamo, cuentas, alGuardar) {
       <div class="campo__fila">
         <div class="campo"><label class="campo__etiqueta">Statement/payment day</label><input class="campo__control" name="fecha_corte" type="number" min="1" max="31" value="${prestamo.fecha_corte || ''}" /></div>
         <div class="campo"><label class="campo__etiqueta">Pay from account</label>
-          <select class="campo__control" name="cuenta_pago_id">${cuentas.map(c => `<option value="${c.id}" ${c.id === prestamo.cuenta_pago_id ? 'selected' : ''}>${c.nombre}</option>`).join('')}</select>
+          <select class="campo__control" name="cuenta_pago_id">${cuentas.map(c => `<option value="${c.id}" ${c.id === prestamo.cuenta_pago_id ? 'selected' : ''}>${etiquetaDeCuentaConBanco(c)}</option>`).join('')}</select>
         </div>
       </div>
-      <div class="campo"><label class="campo__etiqueta">Notes</label><textarea class="campo__control" name="notas" rows="2">${prestamo.notas || ''}</textarea></div>
+      <div class="campo"><label class="campo__etiqueta">Notes</label><textarea class="campo__control" name="notas" rows="2">${escaparHTML(prestamo.notas || '')}</textarea></div>
 
-      <p id="pago-preview-editar" style="font-size:12.5px; margin:4px 0 12px; opacity:.85;"></p>
+      <p id="pago-preview-editar" class="campo__vista-previa"></p>
 
       <div class="modal__acciones">
         <button type="button" class="btn btn--fantasma" data-cerrar-modal>Cancel</button>
@@ -359,16 +361,15 @@ function abrirModalEditarPrestamo(prestamo, cuentas, alGuardar) {
 function abrirModalAbonoCapital(prestamo, cuentas, alGuardar) {
   const { overlay, cerrar } = abrirModal(`
     <h3 class="modal__titulo">Extra principal payment</h3>
-    <p style="font-size:12.5px; opacity:.75; margin:-6px 0 14px;">
-      Pays down ${prestamo.nombre}'s balance directly, on top of the regular monthly payment. The monthly payment will be recalculated afterward.
+    <p class="modal__subtitulo">Pays down ${escaparHTML(prestamo.nombre)}’s balance directly, on top of the regular monthly payment. The monthly payment will be recalculated afterward.
     </p>
     <form id="form-abono-prestamo">
       <div class="campo"><label class="campo__etiqueta">Amount</label><input class="campo__control" name="monto" inputmode="decimal" placeholder="0.00" required /><div class="campo__error"></div></div>
       <div class="campo"><label class="campo__etiqueta">From account</label>
-        <select class="campo__control" name="cuenta_debito_id" required>${cuentas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('')}</select>
+        <select class="campo__control" name="cuenta_debito_id" required>${cuentas.map(c => `<option value="${c.id}">${etiquetaDeCuentaConBanco(c)}</option>`).join('')}</select>
       </div>
       <div class="campo"><label class="campo__etiqueta">Date</label><input class="campo__control" type="date" name="fecha" value="${hoyISO()}" /></div>
-      <p style="font-size:12.5px; opacity:.85; margin:4px 0 12px;">Current balance: ${formatoMoneda(prestamo.saldo_actual)}</p>
+      <p class="ayuda">Current balance: ${formatoMoneda(prestamo.saldo_actual)}</p>
       <div class="modal__acciones">
         <button type="button" class="btn btn--fantasma" data-cerrar-modal>Cancel</button>
         <button type="submit" class="btn btn--primario">Apply payment</button>
@@ -425,28 +426,22 @@ function abrirModalAmortizacion(prestamo) {
   const totalInteres = filas.reduce((a, f) => a + f.interes, 0);
 
   abrirModal(`
-    <h3 class="modal__titulo">Estimated amortization — ${prestamo.nombre}</h3>
-    <p style="font-size:12.5px; opacity:.75; margin:-6px 0 14px;">
-      Assumes the current monthly payment stays fixed and no extra principal payments are made. Total remaining interest: ${formatoMoneda(totalInteres)}.
+    <h3 class="modal__titulo">Estimated amortization — ${escaparHTML(prestamo.nombre)}</h3>
+    <p class="modal__subtitulo">Assumes the current monthly payment stays fixed and no extra principal payments are made. Total remaining interest: ${formatoMoneda(totalInteres)}.
     </p>
     <div style="max-height:340px; overflow-y:auto;">
-      <table style="width:100%; border-collapse:collapse; font-size:12.5px;">
+      <table class="tabla-mini">
         <thead>
-          <tr style="text-align:left; opacity:.7;">
-            <th style="padding:6px 4px;">#</th>
-            <th style="padding:6px 4px;">Interest</th>
-            <th style="padding:6px 4px;">Principal</th>
-            <th style="padding:6px 4px;">Remaining balance</th>
-          </tr>
+          <tr><th>#</th><th class="derecha">Interest</th><th class="derecha">Principal</th><th class="derecha">Remaining balance</th></tr>
         </thead>
         <tbody>
           ${filas.map(f => `
-            <tr style="border-top:1px solid rgba(255,255,255,.08);">
-              <td style="padding:6px 4px;">${f.mes}</td>
-              <td style="padding:6px 4px;" class="numero negativo">${formatoMoneda(f.interes)}</td>
-              <td style="padding:6px 4px;" class="numero">${formatoMoneda(f.capital)}</td>
-              <td style="padding:6px 4px;">${formatoMoneda(f.saldo)}</td>
-            </tr>`).join('') || '<tr><td colspan="4" style="padding:10px 4px; opacity:.7;">No remaining months to project.</td></tr>'}
+            <tr>
+              <td>${f.mes}</td>
+              <td class="numero negativo derecha">${formatoMoneda(f.interes)}</td>
+              <td class="numero derecha">${formatoMoneda(f.capital)}</td>
+              <td class="numero derecha">${formatoMoneda(f.saldo)}</td>
+            </tr>`).join('') || '<tr><td colspan="4" class="texto-tenue">No remaining months to project.</td></tr>'}
         </tbody>
       </table>
     </div>

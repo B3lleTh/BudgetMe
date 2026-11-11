@@ -5,19 +5,27 @@ import { traducirNodo } from './i18n.js';
 export function abrirModal(contenidoHTML, { clase = '' } = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
-  overlay.innerHTML = `<div class="modal modal--formulario ${clase}">${contenidoHTML}</div>`;
+  overlay.innerHTML = `<div class="modal modal--formulario ${clase}" role="dialog" aria-modal="true" tabindex="-1">${contenidoHTML}</div>`;
   traducirNodo(overlay);
   document.body.appendChild(overlay);
   requestAnimationFrame(() => overlay.classList.add('modal-overlay--visible'));
 
   const cerrar = () => {
+    // Inerte desde ya: durante el desvanecido nada debe poder volver a
+    // enviarse (un doble clic guardaba el mismo movimiento dos veces).
+    overlay.inert = true;
     overlay.classList.remove('modal-overlay--visible');
     overlay.addEventListener('transitionend', () => overlay.remove(), { once: true });
+    setTimeout(() => overlay.remove(), 400); // por si no hay transición (movimiento reducido)
   };
   overlay.addEventListener('click', (e) => { if (e.target === overlay) cerrar(); });
   overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') cerrar(); });
-  const btnCerrar = overlay.querySelector('[data-cerrar-modal]');
-  if (btnCerrar) btnCerrar.addEventListener('click', cerrar);
+  overlay.querySelectorAll('[data-cerrar-modal]').forEach(b => b.addEventListener('click', cerrar));
+  // Foco inicial dentro del modal: sin esto Escape no cerraba nada.
+  requestAnimationFrame(() => {
+    const primero = overlay.querySelector('input:not([type=hidden]):not([type=checkbox]):not([type=radio]), select, textarea, button');
+    (primero || overlay.querySelector('.modal')).focus?.();
+  });
 
   return { overlay, cerrar };
 }
@@ -68,4 +76,29 @@ export function marcarError(campoEl, mensaje) {
 }
 export function limpiarError(campoEl) {
   campoEl.classList.remove('campo--invalido');
+}
+
+/** Deshabilita el botón de envío mientras corre `tarea` (evita registrar el
+ * mismo movimiento dos veces con doble clic). Si la tarea lanza, el botón se
+ * reactiva y el error sigue su curso. */
+export async function conBotonOcupado(boton, tarea) {
+  if (!boton || boton.disabled) return;
+  boton.disabled = true;
+  boton.classList.add('btn--carga');
+  try {
+    return await tarea();
+  } finally {
+    if (boton.isConnected) {
+      boton.disabled = false;
+      boton.classList.remove('btn--carga');
+    }
+  }
+}
+
+/** 'claro' | 'oscuro' | 'sistema' (sigue al sistema operativo). */
+export function aplicarTema(tema) {
+  const raiz = document.documentElement;
+  if (tema === 'claro') raiz.dataset.theme = 'light';
+  else if (tema === 'oscuro') raiz.dataset.theme = 'dark';
+  else delete raiz.dataset.theme;
 }

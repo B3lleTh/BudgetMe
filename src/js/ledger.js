@@ -9,10 +9,7 @@ import { transaccion } from './db.js';
 // de la misma matemática. sincronizarPrestamos.js solo importa de db.js,
 // así que esta importación no genera ciclo.
 import { calcularPagoMensual } from './sincronizarPrestamos.js';
-
-function hoyISO() {
-  return new Date().toISOString().slice(0, 10);
-}
+import { hoyISO } from './formato.js';
 
 async function registrarTx(db, { fecha, tipo, origen, destino, categoria, monto, notas, ref_tabla, ref_id, prestamo_capital }) {
   await db.execute(
@@ -65,6 +62,8 @@ export async function pagarTarjeta({ tarjetaId, cuentaDebitoId, monto, fecha, us
   return transaccion(async (db) => {
     if (usarReservaTC) {
       const cajaId = await idCajaReservaTC(db);
+      const [caja] = await db.select(`SELECT saldo FROM cajas WHERE id = $1`, [cajaId]);
+      if ((caja?.saldo ?? 0) < monto) throw new Error('INSUFFICIENT_RESERVE_BALANCE');
       await db.execute(`UPDATE cajas SET saldo = saldo - $1 WHERE id = $2`, [monto, cajaId]);
       await registrarTx(db, {
         fecha, tipo: 'pago_tc', origen: `caja:${cajaId}`, destino: `tarjeta:${tarjetaId}`,
@@ -168,7 +167,9 @@ export async function abonarRecurrente({ recurrente, cuentaDebitoId, monto, fech
     if (nuevoAbonado >= recurrente.monto) {
       await db.execute(`UPDATE recurrentes SET abonado = 0, estado = 'pagado', ultima_aplicacion = $1 WHERE id = $2`, [fecha || hoyISO(), recurrente.id]);
     } else {
-      await db.execute(`UPDATE recurrentes SET abonado = $1 WHERE id = $2`, [nuevoAbonado, recurrente.id]);
+      // ultima_aplicacion marca el mes del abono, para que el reinicio
+      // mensual sepa cuándo descartar un abono que nunca se completó.
+      await db.execute(`UPDATE recurrentes SET abonado = $1, ultima_aplicacion = $2 WHERE id = $3`, [nuevoAbonado, fecha || hoyISO(), recurrente.id]);
     }
   });
 }
@@ -220,7 +221,11 @@ export async function revertirTransaccion(tx) {
       if (!ref) return;
       const [entidad, id] = ref.split(':');
       if (entidad === 'debito') await db.execute(`UPDATE cuentas_debito SET saldo = saldo + $1 WHERE id = $2`, [signo * tx.monto, id]);
-      if (entidad === 'tarjeta') await db.execute(`UPDATE tarjetas SET saldo = saldo + $1 WHERE id = $2`, [signo * tx.monto, id]);
+      // El saldo de una tarjeta es DEUDA (pasivo): va al revés que una cuenta.
+      // Revertir un gasto con tarjeta (origen tarjeta) baja la deuda; revertir
+      // un pago (destino tarjeta) la vuelve a subir. Antes se sumaba igual que
+      // en débito y borrar un gasto con tarjeta DUPLICABA la deuda.
+      if (entidad === 'tarjeta') await db.execute(`UPDATE tarjetas SET saldo = saldo - $1 WHERE id = $2`, [signo * tx.monto, id]);
       if (entidad === 'caja') await db.execute(`UPDATE cajas SET saldo = saldo + $1 WHERE id = $2`, [signo * tx.monto, id]);
     };
     // Revertir: lo que salió de "origen" regresa (+), lo que entró a "destino" se resta (-)
@@ -337,6 +342,60 @@ export async function revertirAbonoCapitalPrestamo(tx, prestamo) {
       `UPDATE prestamos SET saldo_actual = $1, pago_mensual = $2, estado = 'activo' WHERE id = $3`,
       [nuevoSaldo, pagoMensual, prestamo.id]
     );
+    await db.execute(`DELETE FROM transacciones WHERE id = $1`, [tx.id]);
+  });
+}
+
+
+
+/** Mueve dinero entre cuentas de débito (o caja <-> débito, caja <-> caja)
+ * sin que cuente como ingreso ni gasto: es el mismo dinero cambiando de
+ * lugar. Registra UN solo movimiento tipo 'transferencia' con origen y
+ * destino; revertirTransaccion() ya lo deshace correctamente. */
+export async function transferirEntreCuentas({ origen, destino, monto, notas, fecha }) {
+  // origen / destino: 'debito:<id>' o 'caja:<id>'
+  return transaccion(async (db) => {
+    if (!(monto > 0)) throw new Error('INVALID_AMOUNT');
+    if (origen === destino) throw new Error('SAME_ACCOUNT');
+
+    const tablaDe = { debito: 'cuentas_debito', caja: 'cajas' };
+    const [entO, idO] = origen.split(':');
+    const [entD, idD] = destino.split(':');
+    if (!tablaDe[entO] || !tablaDe[entD]) throw new Error('INVALID_ACCOUNT');
+
+    const filaO = (await db.select(`SELECT saldo FROM ${tablaDe[entO]} WHERE id = $1`, [idO]))[0];
+    if (!filaO) throw new Error('INVALID_ACCOUNT');
+    if (filaO.saldo < monto) throw new Error('INSUFFICIENT_DEBIT_BALANCE');
+
+    // La caja de sistema se maneja solo con movimientoCaja().
+    for (const [ent, id] of [[entO, idO], [entD, idD]]) {
+      if (ent === 'caja') {
+        const c = (await db.select(`SELECT es_sistema FROM cajas WHERE id = $1`, [id]))[0];
+        if (!c) throw new Error('INVALID_ACCOUNT');
+        if (c.es_sistema) throw new Error('SYSTEM_BOX_LOCKED');
+      }
+    }
+
+    await db.execute(`UPDATE ${tablaDe[entO]} SET saldo = saldo - $1 WHERE id = $2`, [monto, idO]);
+    await db.execute(`UPDATE ${tablaDe[entD]} SET saldo = saldo + $1 WHERE id = $2`, [monto, idD]);
+    await registrarTx(db, {
+      fecha, tipo: 'transferencia', origen, destino,
+      categoria: 'transferencia', monto, notas,
+    });
+  });
+}
+
+
+/** Deshace una transferencia. Falla si el destino ya gastó ese dinero. */
+export async function revertirTransferencia(tx) {
+  return transaccion(async (db) => {
+    const tablaDe = { debito: 'cuentas_debito', caja: 'cajas' };
+    const [entO, idO] = tx.origen.split(':');
+    const [entD, idD] = tx.destino.split(':');
+    const destino = (await db.select(`SELECT saldo FROM ${tablaDe[entD]} WHERE id = $1`, [idD]))[0];
+    if (!destino || destino.saldo < tx.monto) throw new Error('INSUFFICIENT_DEBIT_BALANCE');
+    await db.execute(`UPDATE ${tablaDe[entD]} SET saldo = saldo - $1 WHERE id = $2`, [tx.monto, idD]);
+    await db.execute(`UPDATE ${tablaDe[entO]} SET saldo = saldo + $1 WHERE id = $2`, [tx.monto, idO]);
     await db.execute(`DELETE FROM transacciones WHERE id = $1`, [tx.id]);
   });
 }

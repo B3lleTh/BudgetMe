@@ -1,58 +1,118 @@
-:root {
-  /* --- Paleta base: morado profundo / crema / rosa pastel --- */
-  --morado: #4E4187;
-  --morado-claro: #6f5fb8;
-  --crema: #FFF7EF;
-  --rosa: #FFCFEF;
-  --rosa-suave: rgba(255, 207, 239, 0.18);
-
-  /* --- Fondos: capas de profundidad sobre base morada oscura --- */
-  --fondo-base: #15102b;
-  --fondo-superficie: rgba(255, 255, 255, 0.055);
-  --fondo-elevado: rgba(255, 255, 255, 0.09);
-  --borde-sutil: rgba(255, 255, 255, 0.12);
-
-  /* --- Vidrio (glassmorphism) --- */
-  --glass-blur: 22px;
-  --glass-borde: rgba(255, 255, 255, 0.16);
-  --glass-brillo: rgba(255, 255, 255, 0.06);
-
-  /* --- Texto --- */
-  --texto-principal: var(--crema);
-  --texto-secundario: #cabfe8;
-  --texto-tenue: #9184bd;
-
-  /* --- Acento primario: rosa pastel sobre morado --- */
-  --acento: #FFCFEF;
-  --acento-fuerte: #f7a8e0;
-  --acento-suave: rgba(255, 207, 239, 0.16);
-
-  /* --- Advertencias --- */
-  --advertencia: #ffcf6b;
-  --advertencia-suave: rgba(255, 207, 107, 0.16);
-
-  /* --- Pérdidas/deuda: rojo, siempre para números negativos --- */
-  --perdida: #ff8fa3;
-  --perdida-suave: rgba(255, 107, 129, 0.16);
-
-  /* --- Ganancias: verde, siempre para números positivos --- */
-  --ganancia: #7CE7B8;
-  --ganancia-suave: rgba(124, 231, 184, 0.16);
-
-  /* --- Información --- */
-  --info: #a7c7ff;
-  --info-suave: rgba(167, 199, 255, 0.16);
-
-  --radio-sm: 10px;
-  --radio-md: 16px;
-  --radio-lg: 22px;
-  --sombra-elevada: 0 20px 50px rgba(20, 10, 40, 0.55);
-  --transicion: 180ms cubic-bezier(.4,0,.2,1);
-
-  --fuente-base: -apple-system, "SF Pro Text", "Inter", system-ui, sans-serif;
-  --fuente-numeros: "Inter", var(--fuente-base);
+/* Tipografía local (src/vendor/fonts, ver scripts/vendor.mjs): sin red. */
+@font-face {
+  font-family: 'Public Sans';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('../vendor/fonts/public-sans-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Public Sans';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('../vendor/fonts/public-sans-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
-/* Los números siempre en verde (positivo) o rojo (negativo), sin importar la sección. */
-.positivo { color: var(--ganancia) !important; }
-.negativo { color: var(--perdida) !important; }
+/* "Libreta": tinta azul marino sobre papel frío, como una libreta bancaria.
+   El latón solo aparece en el sello de la marca y en el avance hacia metas. */
+:root {
+  color-scheme: light;
+
+  --papel: #EDF0F3;
+  --superficie: #FFFFFF;
+  --superficie-2: #F5F7F9;
+  --linea: #DDE2E8;
+  --linea-fuerte: #C3CCD6;
+
+  --tinta: #16243A;
+  --tinta-2: #4A5A70;
+  --tinta-3: #77859A;
+
+  --laton: #9A6B1F;
+  --laton-suave: #F3E9D6;
+
+  --primario: #16243A;
+  --primario-texto: #FFFFFF;
+  --primario-hover: #22344F;
+
+  --ganancia: #17794A;
+  --ganancia-suave: #E3F2EA;
+  --perdida: #B42318;
+  --perdida-suave: #FBE9E7;
+  --advertencia: #9A5B05;
+  --advertencia-suave: #FCF0DC;
+  --info: #2B5BA8;
+  --info-suave: #E5EDF9;
+
+  --foco: #2B5BA8;
+  --velo: rgba(22, 36, 58, 0.38);
+  --sombra-flotante: 0 1px 2px rgba(22, 36, 58, 0.06), 0 12px 32px rgba(22, 36, 58, 0.14);
+
+  --radio-sm: 6px;
+  --radio-md: 10px;
+  --radio-lg: 14px;
+  --transicion: 140ms cubic-bezier(.4, 0, .2, 1);
+
+  --fuente-base: 'Public Sans', -apple-system, 'Segoe UI', system-ui, sans-serif;
+}
+
+/* Modo oscuro: el sistema decide, salvo que se fije data-theme. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --papel: #0D1522;
+    --superficie: #131D2C;
+    --superficie-2: #192536;
+    --linea: #24324A;
+    --linea-fuerte: #33455F;
+    --tinta: #E7ECF3;
+    --tinta-2: #A9B5C6;
+    --tinta-3: #7A889D;
+    --laton: #D6A851;
+    --laton-suave: #3A2F1A;
+    --primario: #DCE4EE;
+    --primario-texto: #0D1522;
+    --primario-hover: #F2F5F9;
+    --ganancia: #46C285;
+    --ganancia-suave: #15372A;
+    --perdida: #F0766E;
+    --perdida-suave: #3E1D1F;
+    --advertencia: #E3A945;
+    --advertencia-suave: #3A2B12;
+    --info: #85A9E8;
+    --info-suave: #1B2C4A;
+    --foco: #85A9E8;
+    --velo: rgba(4, 8, 14, 0.62);
+    --sombra-flotante: 0 1px 2px rgba(0, 0, 0, 0.3), 0 16px 40px rgba(0, 0, 0, 0.45);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --papel: #0D1522;
+  --superficie: #131D2C;
+  --superficie-2: #192536;
+  --linea: #24324A;
+  --linea-fuerte: #33455F;
+  --tinta: #E7ECF3;
+  --tinta-2: #A9B5C6;
+  --tinta-3: #7A889D;
+  --laton: #D6A851;
+  --laton-suave: #3A2F1A;
+  --primario: #DCE4EE;
+  --primario-texto: #0D1522;
+  --primario-hover: #F2F5F9;
+  --ganancia: #46C285;
+  --ganancia-suave: #15372A;
+  --perdida: #F0766E;
+  --perdida-suave: #3E1D1F;
+  --advertencia: #E3A945;
+  --advertencia-suave: #3A2B12;
+  --info: #85A9E8;
+  --info-suave: #1B2C4A;
+  --foco: #85A9E8;
+  --velo: rgba(4, 8, 14, 0.62);
+  --sombra-flotante: 0 1px 2px rgba(0, 0, 0, 0.3), 0 16px 40px rgba(0, 0, 0, 0.45);
+}

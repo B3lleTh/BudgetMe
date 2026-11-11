@@ -91,12 +91,28 @@ fn restaurar_respaldo(app: tauri::AppHandle, ruta: String) -> Result<(), String>
         let _ = crear_respaldo(app.clone());
     }
     fs::copy(&origen, &destino).map_err(|e| e.to_string())?;
+    // Un -wal/-shm del archivo anterior se aplicaría encima del respaldo
+    // restaurado al reabrir la base y lo dejaría a medias o corrupto.
+    for sufijo in ["-wal", "-shm"] {
+        let lateral = PathBuf::from(format!("{}{}", destino.to_string_lossy(), sufijo));
+        if lateral.exists() {
+            fs::remove_file(&lateral).map_err(|e| e.to_string())?;
+        }
+    }
     Ok(())
 }
 
+/// Exporta un respaldo concreto (ruta_origen) o, si no se indica, la base actual.
+/// Antes el botón "Exportar" de cada respaldo exportaba siempre la base actual.
 #[tauri::command]
-fn exportar_respaldo(app: tauri::AppHandle, ruta_destino: String) -> Result<(), String> {
-    let origen = db_path(&app);
+fn exportar_respaldo(app: tauri::AppHandle, ruta_destino: String, ruta_origen: Option<String>) -> Result<(), String> {
+    let origen = match ruta_origen {
+        Some(r) => PathBuf::from(r),
+        None => db_path(&app),
+    };
+    if !origen.exists() {
+        return Err("El archivo a exportar no existe".into());
+    }
     fs::copy(&origen, &ruta_destino).map_err(|e| e.to_string())?;
     Ok(())
 }

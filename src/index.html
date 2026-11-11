@@ -5,36 +5,52 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>BudgetMe</title>
 <link rel="stylesheet" href="css/main.css" />
+<!-- Todo local (src/vendor, generado con `npm run vendor`): la app ya no
+     depende de esm.sh/jsDelivr para arrancar, y las versiones JS quedan
+     fijadas a las mismas que usan los plugins de Rust. -->
 <script type="importmap">
 {
   "imports": {
-    "@tauri-apps/plugin-sql": "https://esm.sh/@tauri-apps/plugin-sql@2?target=es2022",
-    "@tauri-apps/plugin-dialog": "https://esm.sh/@tauri-apps/plugin-dialog@2?target=es2022",
-    "@tauri-apps/api/core": "https://esm.sh/@tauri-apps/api@2/core?target=es2022"
+    "@tauri-apps/plugin-sql": "./vendor/plugin-sql.js",
+    "@tauri-apps/plugin-dialog": "./vendor/plugin-dialog.js",
+    "@tauri-apps/api/core": "./vendor/tauri-api/core.js"
   }
 }
 </script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script src="vendor/chart.umd.min.js"></script>
 </head>
 <body>
   <div class="app">
-    <nav class="nav" id="nav">
-      <div class="nav__marca">BudgetMe<span>.</span></div>
-      <button class="nav__item" data-vista="dashboard"></button>
-      <button class="nav__item" data-vista="ingresos"></button>
-      <button class="nav__item" data-vista="gastos"></button>
-      <button class="nav__item" data-vista="prestamos"></button>
-      <button class="nav__item" data-vista="tarjetas"></button>
-      <button class="nav__item" data-vista="cajas"></button>
-      <button class="nav__item" data-vista="recurrentes"></button>
-      <button class="nav__item" data-vista="inversiones"></button>
-      <button class="nav__item" data-vista="historial"></button>
-      <button class="nav__item" data-vista="respaldos"></button>
-      <button class="nav__item" data-vista="configuracion"></button>
+    <nav class="nav" id="nav" aria-label="Main">
+      <div class="nav__marca">
+        <span class="nav__sello" aria-hidden="true">B</span>
+        <span>BudgetMe</span>
+      </div>
+      <div class="nav__grupo">
+        <button class="nav__item" data-vista="dashboard"></button>
+        <button class="nav__item" data-vista="historial"></button>
+      </div>
+      <div class="nav__grupo" data-grupo="nav.grupo.dinero">
+        <span class="nav__titulo-grupo"></span>
+        <button class="nav__item" data-vista="ingresos"></button>
+        <button class="nav__item" data-vista="gastos"></button>
+        <button class="nav__item" data-vista="recurrentes"></button>
+      </div>
+      <div class="nav__grupo" data-grupo="nav.grupo.patrimonio">
+        <span class="nav__titulo-grupo"></span>
+        <button class="nav__item" data-vista="tarjetas"></button>
+        <button class="nav__item" data-vista="cajas"></button>
+        <button class="nav__item" data-vista="inversiones"></button>
+        <button class="nav__item" data-vista="prestamos"></button>
+      </div>
+      <div class="nav__grupo nav__grupo--pie">
+        <button class="nav__item" data-vista="respaldos"></button>
+        <button class="nav__item" data-vista="configuracion"></button>
+      </div>
     </nav>
     <main class="vista" id="vista"></main>
   </div>
 
-  <script type="module" src="js/app.js"></script>
+  <script type="module" src="js/arranque.js"></script>
 </body>
 </html>
